@@ -1,32 +1,32 @@
-# === Python ===
+# Python
+.venv/
 __pycache__/
 *.py[cod]
-*.egg-info/
-.venv/
-venv/
+*$py.class
+.pytest_cache/
 
-# === Data ===
-data/wemp_data.db
-data/agent_storage.db
-logs/*.log
-
-# === Config (local secrets) ===
-config.yaml
-config.server.yaml
-
-# === OS ===
-.DS_Store
-Thumbs.db
-
-# === Frontend ===
+# Node / Vue
+node_modules/
 frontend/node_modules/
 frontend/dist/
+.npm
+.eslintcache
 
-# === IDE ===
-.vscode/
-.idea/
-*.swp
+# Project Specific
+data/*.db
+data/*.sqlite
+logs/*.log
+logs/*.txt
 
-# === Misc ===
-.clawhub/
-scratch/
+# Configuration & Secrets
+config/config.yaml
+config/config.server.yaml
+.env
+.env.local
+.env.*.local
+frontend/.env.local
+frontend/.env.production.local
+
+# OS
+.DS_Store
+Thumbs.db

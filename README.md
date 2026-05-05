@@ -35,73 +35,64 @@ wemp_data/
 
 ---
 
-## 🚀 服务器部署与启动指南
+## 🚀 生产环境部署 (Ubuntu Server)
 
-### 1. 准备工作 (仅第一次)
+项目在服务器上的根目录为 `/opt/wemp_data`，使用内置虚拟环境。
 
+### 1. 环境准备
 ```bash
-# 激活环境
-python3 -m venv .venv
+cd /opt/wemp_data
+# 激活虚拟环境
 source .venv/bin/activate
+# 安装依赖
 pip install -r requirements.txt
-
-# 释放旧端口 (如有)
-kill -9 $(lsof -t -i:8501)
 ```
 
-### 2. 后端启动 (API + Worker)
+### 2. 服务启动与管理 (PM2)
+推荐使用 PM2 管理后端 API 和前端服务，确保宕机自动重启。
 
-后端不仅提供接口，还负责在后台运行同步和向量化任务。
+*   **后端 API (`wemp-api`)**:
+    ```bash
+    # 启动/重启
+    pm2 restart wemp-api || pm2 start "uvicorn api.main:app --host 0.0.0.0 --port 8000" --name wemp-api
+    ```
+*   **前端 UI (`wemp-frontend`)**:
+    ```bash
+    cd /opt/wemp_data/frontend
+    npm run build
+    pm2 restart wemp-frontend || pm2 start "serve -s dist -l 8501" --name wemp-frontend
+    ```
 
-* **开发者模式** (用于调试):
-
-  ```bash
-  export WEMP_CONFIG=config.server.yaml
-  uvicorn api.main:app --host 0.0.0.0 --port 8000
-  ```
-
-* **生产模式** (使用 PM2 后台持久运行):
-
-  ```bash
-  pm2 start "uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 4" --name wemp-api
-  ```
-
-### 3. 前端部署 (UI)
-
-前端必须先编译再部署，推荐使用 **8501** 端口。
-
-1. **修改 IP**: 编辑 `frontend/.env.production`，将 `VITE_API_BASE` 改为服务器公网 IP。
-2. **打包**: `cd frontend && npm install && npm run build`。
-3. **使用 PM2 快速启动**:
-
-   ```bash
-   npm install -g serve
-   pm2 start "serve -s dist -l 8501" --name wemp-frontend
-   ```
-
-   *(或者使用 Nginx 托管 `dist` 目录)*
+### 3. 常用运维指令
+*   **查看服务状态**: `pm2 list`
+*   **查看后端日志**: `pm2 logs wemp-api`
+*   **清理日志**: `pm2 flush`
+*   **停止所有服务**: `pm2 stop all`
 
 ---
 
-## 🛠️ 运维与上传建议
+## 🛠️ GitHub 私有库同步指南
 
-### 上传服务器 (本地打包)
+为了确保安全，请按照以下步骤操作，**务必确认已配置 .gitignore**。
 
-```bash
-# 排除无关文件打包
-tar -czvf wemp_portal.tar.gz \
-    --exclude='.venv' --exclude='node_modules' \
-    --exclude='logs/*' --exclude='data/*.db' \
-    --exclude='.git' --exclude='frontend/dist' .
-```
+1.  **初始化与关联远程库** (仅需执行一次):
+    ```bash
+    git init
+    # 替换为您的私有库地址
+    git remote add origin https://github.com/您的用户名/wemp_data.git
+    git branch -M main
+    ```
 
-### 管理命令
+2.  **日常上传指令**:
+    ```bash
+    git add .
+    git commit -m "feat: 研报详情页三栏优化及对话管理功能完善"
+    git push -u origin main
+    ```
 
-* **查看运行状态**: `pm2 list`
-* **查看实时日志**: `pm2 logs wemp-api`
-* **手动任务**: `python3 main.py ingest --config config.server.yaml`
-* **健康检查**: `python3 main.py health --config config.server.yaml`
+> [!IMPORTANT]
+> **安全警告**: 禁止将 `config/config.yaml` (含数据库密钥) 或 `.env` 文件上传至 GitHub。请确保 `.gitignore` 包含这些敏感文件。
 
 ---
 
-*Powered by Antigravity AI Engineering*
+*Powered by Antigravity AI Engineering - 2026*
