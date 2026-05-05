@@ -1,0 +1,32 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# === Data ===
+data/wemp_data.db
+data/agent_storage.db
+logs/*.log
+
+# === Config (local secrets) ===
+config.yaml
+config.server.yaml
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === Frontend ===
+frontend/node_modules/
+frontend/dist/
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+
+# === Misc ===
+.clawhub/
+scratch/

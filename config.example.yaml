@@ -1,0 +1,51 @@
+# ============================================================
+# Wemp 投研系统统一配置文件 (v4.0)
+# ============================================================
+
+# 1. 核心数据源 (we-mp-rss)
+base_url: "http://${WEMP_HOST:-106.54.219.69}:8001"
+database_url: "sqlite:///./data/wemp_data.db"
+
+# 2. 腾讯云 COS (图片存储)
+tencent_cos:
+  enabled: true
+  secret_id: "YOUR_COS_SECRET_ID"
+  secret_key: "YOUR_COS_SECRET_KEY"
+  region: "ap-shanghai"
+  bucket: "YOUR_BUCKET_NAME"
+
+# 3. DolphinDB 向量数据库
+dolphindb:
+  host: "${WEMP_HOST:-106.54.219.69}"
+  port: 8848
+  user: "admin"
+  password: "123456"
+  database: "dfs://wemp_vector"
+  articles_table: "wemp_articles"
+  chunks_table: "wemp_chunks"
+  mp_profiles_table: "wemp_mp_profiles"
+  topic_profiles_table: "wemp_topic_profiles"
+
+# 4. 向量化 Embedding 配置
+embedding:
+  provider: "openai_compatible"
+  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  model: "text-embedding-v4"
+  dimension: 1024
+  batch_size: 32
+
+# 5. API 密钥统一管理
+api_keys:
+  dashscope: "YOUR_DASHSCOPE_API_KEY"
+  deepseek: "YOUR_DEEPSEEK_API_KEY"
+
+# 6. 运行参数
+feed_batch_size: 30
+article_batch_size: 20
+poll_interval_seconds: 600
+
+# 7. 智能主题分类规则 (可选)
+topic_rules:
+  信用债: ["信用债", "城投", "地产债", "利差", "违约"]
+  利率债: ["利率债", "国债", "金融债", "收益率曲线"]
+  宏观资金: ["央行", "流动性", "逆回购", "MLF", "降准"]
