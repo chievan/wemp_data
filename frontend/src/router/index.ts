@@ -3,6 +3,7 @@ import Knowledge from '../views/Knowledge.vue'
 import AiCommittee from '../views/AiCommittee.vue'
 import Dashboard from '../views/Dashboard.vue'
 import SystemLogs from '../views/SystemLogs.vue'
+import Skills from '../views/Skills.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -30,6 +31,11 @@ const router = createRouter({
       path: '/logs',
       name: 'system_logs',
       component: SystemLogs
+    },
+    {
+      path: '/skills',
+      name: 'skills_manager',
+      component: Skills
     }
   ]
 })

@@ -7,6 +7,7 @@ const navItems = [
   { key: 'knowledge', label: '🔍 研报知识库', path: '/knowledge' },
   { key: 'ai_committee', label: '⚖️ 智能投委会', path: '/ai-committee' },
   { key: 'data_asset', label: '📊 数据资产中心', path: '/dashboard' },
+  { key: 'skills_manager', label: '🛡️ 技能资产管理', path: '/skills' },
   { key: 'system_logs', label: '🖥️ 系统日志管理', path: '/logs' },
 ]
 </script>

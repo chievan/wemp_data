@@ -159,8 +159,64 @@ const sendMessage = async () => {
   }
 }
 
+const allSkills = ref<any[]>([])
+const showSkillMenu = ref(false)
+const skillSearch = ref('')
+const selectedSkillIndex = ref(0)
+
+const fetchSkills = async () => {
+  try {
+    const res = await fetch(`${API_BASE}/skills`)
+    const data = await res.json()
+    allSkills.value = Array.isArray(data) ? data : []
+    console.log('Skills loaded:', allSkills.value)
+  } catch (e) {
+    console.error('Failed to fetch skills', e)
+  }
+}
+
+const filteredSkills = computed(() => {
+  if (!skillSearch.value) return allSkills.value
+  return allSkills.value.filter(s => 
+    s.id.toLowerCase().includes(skillSearch.value.toLowerCase()) || 
+    s.name.toLowerCase().includes(skillSearch.value.toLowerCase())
+  )
+})
+
+const handleInput = (e: any) => {
+  const cursor = e.target.selectionStart
+  const textBefore = currentInput.value.substring(0, cursor)
+  const lastAt = textBefore.lastIndexOf('@')
+  
+  if (lastAt !== -1 && (lastAt === 0 || textBefore[lastAt - 1] === ' ' || textBefore[lastAt - 1] === '\n')) {
+    const search = textBefore.substring(lastAt + 1)
+    if (!search.includes(' ')) {
+      showSkillMenu.value = true
+      skillSearch.value = search
+      selectedSkillIndex.value = 0
+      return
+    }
+  }
+  showSkillMenu.value = false
+}
+
+const selectSkill = (skillId: string) => {
+  const cursor = document.querySelector('textarea')?.selectionStart || 0
+  const textBefore = currentInput.value.substring(0, cursor)
+  const textAfter = currentInput.value.substring(cursor)
+  const lastAt = textBefore.lastIndexOf('@')
+  
+  currentInput.value = textBefore.substring(0, lastAt) + '@' + skillId + ' ' + textAfter
+  showSkillMenu.value = false
+  // Focus back to textarea
+  setTimeout(() => {
+    document.querySelector('textarea')?.focus()
+  }, 10)
+}
+
 onMounted(() => {
   loadSessions()
+  fetchSkills()
 })
 </script>
 
@@ -258,11 +314,34 @@ onMounted(() => {
 
             <!-- Chat Input Box -->
             <div class="relative bg-slate-50 border border-slate-300 rounded-2xl shadow-sm focus-within:ring-2 focus-within:ring-blue-100 focus-within:border-blue-400 transition-all flex items-end">
+              
+              <!-- Skill Mention Menu -->
+              <div v-if="showSkillMenu && filteredSkills.length > 0" class="absolute bottom-full left-0 mb-2 w-72 bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden z-50">
+                <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-widest">召唤 AI 技能</div>
+                <div class="max-h-60 overflow-y-auto">
+                  <div 
+                    v-for="skill in filteredSkills" 
+                    :key="skill.id"
+                    @click="selectSkill(skill.id)"
+                    class="px-4 py-3 hover:bg-blue-50 cursor-pointer flex items-center gap-3 transition-colors border-b border-slate-50 last:border-0"
+                  >
+                    <div class="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs shrink-0">
+                      {{ skill.name.slice(0, 1) }}
+                    </div>
+                    <div class="min-w-0 flex-1">
+                      <div class="text-sm font-bold text-slate-800 truncate">{{ skill.name }}</div>
+                      <div class="text-[10px] text-slate-400 truncate">{{ skill.id }}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <textarea 
                 v-model="currentInput" 
+                @input="handleInput"
                 @keypress.enter.prevent="sendMessage"
                 :disabled="isChatting"
-                placeholder="向投研知识库提问，例如：总结近期信用债市场的研报观点" 
+                placeholder="向投研知识库提问，或输入 @ 召唤专业技能..." 
                 class="w-full bg-transparent border-none focus:ring-0 resize-none py-4 pl-5 pr-16 text-slate-800 disabled:opacity-50 min-h-[56px] max-h-[200px]"
                 rows="1"
                 style="field-sizing: content;"
