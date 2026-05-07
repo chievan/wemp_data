@@ -25,7 +25,8 @@ class ArticleListResponse(BaseModel):
 def get_articles(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
-    search: Optional[str] = None
+    search: Optional[str] = None,
+    embedded: Optional[int] = Query(None, description="Filter by embedding status: 1 for embedded, 0 for not")
 ):
     # Since the old schema doesn't have an SQLAlchemy model yet, we can just use raw SQLite here
     # or define the model. Raw SQL is fine for now.
@@ -37,12 +38,22 @@ def get_articles(
     query = "SELECT article_id, mp_name, title, source_url, published_at, embedded FROM wemp_articles"
     count_query = "SELECT count(*) FROM wemp_articles"
     params = []
+    where_clauses = []
     
     if search:
-        search_clause = " WHERE title LIKE ? OR mp_name LIKE ?"
-        query += search_clause
-        count_query += search_clause
+        where_clauses.append("(title LIKE ? OR mp_name LIKE ?)")
         params.extend([f"%{search}%", f"%{search}%"])
+    
+    if embedded is not None:
+        if embedded == 1:
+            where_clauses.append("embedded = 1")
+        else:
+            where_clauses.append("(embedded IS NULL OR embedded = 0)")
+
+    if where_clauses:
+        clause = " WHERE " + " AND ".join(where_clauses)
+        query += clause
+        count_query += clause
         
     query += " ORDER BY published_at DESC LIMIT ? OFFSET ?"
     

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import axios from 'axios'
 import { marked } from 'marked'
 
@@ -53,6 +53,7 @@ const articlesLoading = ref(true)
 const searchQuery = ref('')
 const currentPage = ref(1)
 const pageSize = ref(15)
+const embeddedFilter = ref<string>('all') // 'all', '1', '0'
 const selectedArticle = ref<any>(null)
 const showDetail = ref(false)
 
@@ -60,8 +61,11 @@ const fetchArticles = async () => {
   articlesLoading.value = true
   try {
     const skip = (currentPage.value - 1) * pageSize.value
-    const searchParam = searchQuery.value ? `&search=${encodeURIComponent(searchQuery.value)}` : ''
-    const res = await axios.get(`${API_BASE}/articles?limit=${pageSize.value}&skip=${skip}${searchParam}`)
+    let url = `${API_BASE}/articles?limit=${pageSize.value}&skip=${skip}`
+    if (searchQuery.value) url += `&search=${encodeURIComponent(searchQuery.value)}`
+    if (embeddedFilter.value !== 'all') url += `&embedded=${embeddedFilter.value}`
+    
+    const res = await axios.get(url)
     articles.value = res.data.items
     totalArticles.value = res.data.total
   } catch (e) {
@@ -70,6 +74,11 @@ const fetchArticles = async () => {
     articlesLoading.value = false
   }
 }
+
+watch(embeddedFilter, () => {
+  currentPage.value = 1
+  fetchArticles()
+})
 
 const handleSearch = () => {
   currentPage.value = 1
@@ -188,6 +197,7 @@ const handleFileUpload = async (event: Event) => {
 }
 
 const chatWithArticle = (article: Article) => {
+  if (!article.embedded) return
   router.push({
     path: '/knowledge',
     query: { 
@@ -347,7 +357,16 @@ onUnmounted(() => {
               <th class="py-3 px-6 font-semibold">公众号</th>
               <th class="py-3 px-6 font-semibold w-1/2">标题</th>
               <th class="py-3 px-6 font-semibold">发布时间</th>
-              <th class="py-3 px-6 font-semibold text-center">向量化</th>
+              <th class="py-3 px-6 font-semibold text-center">
+                <div class="flex items-center justify-center gap-1">
+                  <span>向量化</span>
+                  <select v-model="embeddedFilter" class="bg-transparent border-none text-[10px] font-bold text-slate-400 focus:ring-0 cursor-pointer p-0 outline-none">
+                    <option value="all">全部</option>
+                    <option value="1">已完成</option>
+                    <option value="0">待处理</option>
+                  </select>
+                </div>
+              </th>
               <th class="py-3 px-6 font-semibold text-center">操作</th>
             </tr>
           </thead>
@@ -369,7 +388,10 @@ onUnmounted(() => {
               <td class="py-2.5 px-6 text-center space-x-3">
                 <button 
                   @click="chatWithArticle(item)"
-                  class="text-emerald-600 hover:text-emerald-800 font-bold text-xs inline-flex items-center gap-1"
+                  :disabled="!item.embedded"
+                  class="font-bold text-xs inline-flex items-center gap-1 transition-colors"
+                  :class="item.embedded ? 'text-emerald-600 hover:text-emerald-800' : 'text-slate-300 cursor-not-allowed'"
+                  :title="item.embedded ? '开启针对性问答' : '请先完成向量化处理再进行问答'"
                 >
                   💡 问答
                 </button>
