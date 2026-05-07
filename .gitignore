@@ -1,9 +1,13 @@
 # Python
 .venv/
+venv/
+env/
 __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Node / Vue
 node_modules/
@@ -12,13 +16,27 @@ frontend/dist/
 .npm
 .eslintcache
 
-# Project Specific
-data/*.db
-data/*.sqlite
-logs/*.log
-logs/*.txt
+# Project Specific Data (IMPORTANT: exclude local databases and files)
+data/*
+!data/.gitkeep
+*.db
+*.sqlite
+*.sqlite3
 
-# Configuration & Secrets
+# Uploads and temporary files
+data/uploads/*
+!data/uploads/.gitkeep
+data/markdown/*
+!data/markdown/.gitkeep
+
+# Logs
+logs/
+*.log
+api.log
+
+# Configuration & Secrets (CRITICAL: Never push these to server)
+config.yaml
+config.server.yaml
 config/config.yaml
 config/config.server.yaml
 .env
@@ -29,4 +47,9 @@ frontend/.env.production.local
 
 # OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db

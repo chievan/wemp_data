@@ -275,7 +275,11 @@ def connect_ddb(cfg: dict):
 
 def embed_texts(client, embed_cfg: dict, texts: list[str]) -> list[list[float]]:
     vectors = []
-    batch_size = int(embed_cfg.get("batch_size", 32))
+    # 强制硬限制：DashScope 接口单次请求最高只能处理 10 个片段
+    batch_size = int(embed_cfg.get("batch_size", 10))
+    if batch_size > 10:
+        batch_size = 10
+    
     dim = int(embed_cfg["dimension"])
     for i in range(0, len(texts), batch_size):
         resp = client.embeddings.create(model=embed_cfg["model"], input=texts[i:i + batch_size])
@@ -292,11 +296,11 @@ def write_to_ddb(sess, cfg: dict, article_row: dict, chunk_rows: list[dict]) -> 
     ddb_cfg = cfg["dolphindb"]
 
     # 删旧数据
-    sess.upload({"_aid": [article_row["article_id"]]})
+    sess.upload({"aidToDelete": [article_row["article_id"]]})
     for tbl in [ddb_cfg["articles_table"], ddb_cfg["chunks_table"]]:
         sess.run(f'''
 if(existsTable("{ddb_cfg["database"]}", `{tbl})){{
-    delete from loadTable("{ddb_cfg["database"]}", `{tbl}) where article_id in _aid;
+    delete from loadTable("{ddb_cfg["database"]}", `{tbl}) where article_id in aidToDelete;
 }}''')
 
     # 写文章表
@@ -304,8 +308,8 @@ if(existsTable("{ddb_cfg["database"]}", `{tbl})){{
     art_df["pub_time"] = pd.to_datetime(art_df["pub_time"]).dt.tz_localize(None)
     art_df["ingested_at"] = pd.to_datetime(art_df["ingested_at"]).dt.tz_localize(None)
     art_df.attrs["__DolphinDB_Type__"] = {"pub_month": ddb.settings.DT_MONTH}
-    sess.upload({"_artDf": art_df})
-    sess.run(f'loadTable("{ddb_cfg["database"]}", `{ddb_cfg["articles_table"]}).append!(_artDf)')
+    sess.upload({"artDfToAppend": art_df})
+    sess.run(f'loadTable("{ddb_cfg["database"]}", `{ddb_cfg["articles_table"]}).append!(artDfToAppend)')
 
     # 写 chunk 表
     if chunk_rows:
@@ -318,13 +322,13 @@ if(existsTable("{ddb_cfg["database"]}", `{tbl})){{
         flat = np.array(embeddings, dtype=np.float32).flatten()
         meta_df = chunks_df.drop(columns=["embedding"]).copy()
         meta_df.attrs["__DolphinDB_Type__"] = {"pub_month": ddb.settings.DT_MONTH}
-        sess.upload({"_chunkMeta": meta_df, "_flatEmb": flat})
+        sess.upload({"chunkMetaToAppend": meta_df, "flatEmbToAppend": flat})
         sess.run(f'''
 idx = (1..{n}) * {dim}
-embArr = arrayVector(idx, _flatEmb)
-_chunkMeta[`embedding] = embArr
-reorderColumns!(_chunkMeta, `pub_month`chunk_id`article_id`content_hash`mp_id`mp_name`title`pub_time`source_url`topic_tags`chunk_no`chunk_text`chunk_len`embedding`ingested_at)
-loadTable("{ddb_cfg["database"]}", `{ddb_cfg["chunks_table"]}).append!(_chunkMeta)
+embArr = arrayVector(idx, flatEmbToAppend)
+chunkMetaToAppend[`embedding] = embArr
+reorderColumns!(chunkMetaToAppend, `pub_month`chunk_id`article_id`content_hash`mp_id`mp_name`title`pub_time`source_url`topic_tags`chunk_no`chunk_text`chunk_len`embedding`ingested_at)
+loadTable("{ddb_cfg["database"]}", `{ddb_cfg["chunks_table"]}).append!(chunkMetaToAppend)
 ''')
 
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import { marked } from 'marked'
 
@@ -31,6 +32,11 @@ const splitContent = (content: string) => {
   }
   return { body: content, refs: '' }
 }
+
+const route = useRoute()
+const router = useRouter()
+const activeFilterArticleId = ref<string | null>(null)
+const activeFilterTitle = ref<string | null>(null)
 
 const enableWeb = ref(true)
 const selectedModel = ref('deepseek-v4-flash')
@@ -66,10 +72,10 @@ const saveSessions = () => {
   localStorage.setItem('wemp_chat_sessions', JSON.stringify(chatSessions.value))
 }
 
-const createNewSession = () => {
+const createNewSession = (title = '新对话') => {
   const newSession: ChatSession = {
     id: generateId(),
-    title: '新对话',
+    title: title,
     messages: [{ role: 'assistant', content: '您好，我是基于 DolphinDB 向量检索的投研知识库助手。请问有什么可以帮您？' }]
   }
   chatSessions.value.unshift(newSession)
@@ -118,8 +124,8 @@ const sendMessage = async () => {
 
   session.messages.push({ role: 'user', content: msg })
   
-  // Auto-generate title for the first user message
-  if (session.messages.filter(m => m.role === 'user').length === 1) {
+  // Auto-generate title for the first user message (if not specialized)
+  if (session.messages.filter(m => m.role === 'user').length === 1 && session.title === '新对话') {
     session.title = msg.length > 15 ? msg.slice(0, 15) + '...' : msg
   }
   
@@ -135,9 +141,11 @@ const sendMessage = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         message: msg, 
-        enable_web: enableWeb.value,
-        model: selectedModel.value 
+        enable_web: activeFilterArticleId.value ? false : enableWeb.value, // 如果指定研报，默认关闭联网
+        model: selectedModel.value,
+        filter_article_id: activeFilterArticleId.value
       })
+
     })
     
     if (!response.body) throw new Error('No response body')
@@ -214,10 +222,37 @@ const selectSkill = (skillId: string) => {
   }, 10)
 }
 
+const clearFilter = () => {
+  activeFilterArticleId.value = null
+  activeFilterTitle.value = null
+  router.replace({ query: {} })
+}
+
 onMounted(() => {
   loadSessions()
   fetchSkills()
+  
+  if (route.query.article_id) {
+    activeFilterArticleId.value = route.query.article_id as string
+    activeFilterTitle.value = route.query.title as string
+    enableWeb.value = false 
+    // 强制开启新专项对话
+    createNewSession(`【专项】${activeFilterTitle.value}`)
+  }
 })
+
+watch(() => route.query.article_id, (newId) => {
+  if (newId) {
+    activeFilterArticleId.value = newId as string
+    activeFilterTitle.value = route.query.title as string
+    enableWeb.value = false
+    createNewSession(`【专项】${activeFilterTitle.value}`)
+  } else {
+    activeFilterArticleId.value = null
+    activeFilterTitle.value = null
+  }
+})
+
 </script>
 
 <template>
@@ -229,7 +264,7 @@ onMounted(() => {
       <div class="w-64 bg-slate-50 border-r border-slate-200 flex flex-col shrink-0 hidden md:flex">
         <div class="px-4 py-3 border-b border-slate-200 flex justify-between items-center bg-white">
           <span class="font-bold text-slate-700 text-sm">历史对话</span>
-          <button @click="createNewSession" class="text-slate-400 hover:text-blue-600 font-bold" title="新建对话">➕</button>
+          <button @click="() => createNewSession()" class="text-slate-400 hover:text-blue-600 font-bold" title="新建对话">➕</button>
         </div>
         <div class="flex-1 overflow-y-auto p-2 space-y-1">
           <div 
@@ -265,7 +300,22 @@ onMounted(() => {
         <!-- Messages Area -->
         <div class="flex-1 overflow-y-auto p-4 md:p-8 space-y-8">
           <div class="max-w-4xl mx-auto w-full">
+            <!-- Active Filter Banner -->
+            <div v-if="activeFilterArticleId" class="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between animate-in slide-in-from-top duration-300">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-lg shadow-lg shadow-emerald-600/20">📄</div>
+                <div>
+                  <div class="text-xs font-black text-emerald-700 uppercase tracking-wider">正在针对单篇研报提问</div>
+                  <div class="text-sm font-bold text-slate-900 truncate max-w-md">{{ activeFilterTitle }}</div>
+                </div>
+              </div>
+              <button @click="clearFilter" class="px-3 py-1.5 bg-white text-emerald-600 border border-emerald-100 rounded-lg text-xs font-bold hover:bg-emerald-100 transition-colors">
+                退出专项问答
+              </button>
+            </div>
+
             <div v-for="(msg, i) in currentMessages" :key="i" class="flex flex-col mb-8" :class="msg.role === 'user' ? 'items-end' : 'items-start'">
+
               <div class="flex items-center gap-2 mb-2" v-if="msg.role === 'assistant'">
                 <div class="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">AI</div>
                 <span class="font-bold text-slate-700">Wemp 投研助手</span>

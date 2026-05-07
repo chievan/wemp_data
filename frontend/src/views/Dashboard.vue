@@ -153,11 +153,56 @@ const startVectorize = async () => {
   }
 }
 
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
+const fileInput = ref<HTMLInputElement | null>(null)
+const uploading = ref(false)
+
+const triggerUpload = () => {
+  fileInput.value?.click()
+}
+
+const handleFileUpload = async (event: Event) => {
+  const target = event.target as HTMLInputElement
+  if (!target.files?.length) return
+  
+  const file = target.files[0]
+  const formData = new FormData()
+  formData.append('file', file)
+  
+  uploading.value = true
+  try {
+    const res = await axios.post(`${API_BASE}/ingest/upload`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+    alert(`文件 "${file.name}" 上传并向量化成功！\nID: ${res.data.article_id}`)
+    fetchStats()
+    fetchArticles()
+  } catch (e: any) {
+    alert('上传失败: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    uploading.value = false
+    if (fileInput.value) fileInput.value.value = ''
+  }
+}
+
+const chatWithArticle = (article: Article) => {
+  router.push({
+    path: '/knowledge',
+    query: { 
+      article_id: article.article_id,
+      title: article.title
+    }
+  })
+}
+
 onMounted(() => {
   fetchStatus()
   fetchStats()
   fetchArticles()
 })
+
 
 onUnmounted(() => {
   if (pollInterval) clearInterval(pollInterval)
@@ -221,6 +266,22 @@ onUnmounted(() => {
           </div>
 
           <div class="flex gap-2">
+            <!-- Hidden File Input -->
+            <input 
+              type="file" 
+              ref="fileInput" 
+              class="hidden" 
+              accept=".pdf,.md,.txt" 
+              @change="handleFileUpload"
+            >
+            <button 
+              @click="triggerUpload"
+              :disabled="uploading"
+              class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold rounded-lg transition-all shadow-sm active:scale-95 text-sm flex items-center gap-2"
+            >
+              <span v-if="uploading" class="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>
+              {{ uploading ? '上传中...' : '📂 上传本地研报' }}
+            </button>
             <button 
               @click="startIngest"
               :disabled="status === 'running' || status === 'pending' || isLoading"
@@ -236,6 +297,7 @@ onUnmounted(() => {
               {{ isLoading ? '提交中...' : '▶ 向量化处理' }}
             </button>
           </div>
+
         </div>
       </div>
       
@@ -304,11 +366,18 @@ onUnmounted(() => {
                   {{ item.embedded ? '已完成' : '待处理' }}
                 </span>
               </td>
-              <td class="py-2.5 px-6 text-center">
+              <td class="py-2.5 px-6 text-center space-x-3">
+                <button 
+                  @click="chatWithArticle(item)"
+                  class="text-emerald-600 hover:text-emerald-800 font-bold text-xs inline-flex items-center gap-1"
+                >
+                  💡 问答
+                </button>
                 <a :href="item.source_url" target="_blank" class="text-blue-600 hover:text-blue-800 font-bold text-xs inline-flex items-center gap-1">
                   原文 ↗
                 </a>
               </td>
+
             </tr>
           </tbody>
         </table>

@@ -16,12 +16,24 @@ class Config:
     def _load(self):
         # 寻找配置文件路径
         root = Path(__file__).parent.parent
-        config_path = root / "config.yaml"
-        if not config_path.exists():
-            config_path = Path("config.yaml")
         
-        if not config_path.exists():
-            raise FileNotFoundError(f"config.yaml not found at {config_path}")
+        # 依次尝试可能的配置文件名
+        candidates = [
+            root / "config.yaml",
+            root / "config.server.yaml",
+            Path("config.yaml"),
+            Path("config.server.yaml"),
+            root / "config.example.yaml"
+        ]
+        
+        config_path = None
+        for p in candidates:
+            if p.exists():
+                config_path = p
+                break
+        
+        if not config_path:
+            raise FileNotFoundError(f"未找到任何配置文件 (config.yaml, config.server.yaml, etc.)")
 
         with open(config_path, "r", encoding="utf-8") as f:
             content = f.read()

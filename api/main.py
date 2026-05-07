@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.core.config import settings
 from api.core.database import Base, engine, SessionLocal
 from api.models.task import IngestTask
+from api.models.chat import ChatSession
 from core.logger import api_logger
 
 # Create tables

@@ -30,3 +30,5 @@ requests
 # 实用工具
 cos-python-sdk-v5
 python-dotenv
+pypdf
+

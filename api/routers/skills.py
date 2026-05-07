@@ -142,3 +142,23 @@ def uninstall_skill(skill_id: str):
         shutil.rmtree(path)
         return {"status": "success"}
     return {"status": "not_found"}
+
+@router.get("/{skill_id}/content")
+def get_skill_content(skill_id: str):
+    """获取技能的详细 Markdown 介绍内容"""
+    path = os.path.join(SKILLS_DIR, skill_id)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Skill not found")
+    
+    # 优先寻找 SKILL.md
+    for f in ["SKILL.md", "skill.md", "README.md", "readme.md"]:
+        f_path = os.path.join(path, f)
+        if os.path.exists(f_path):
+            try:
+                with open(f_path, "r", encoding="utf-8", errors='ignore') as f_obj:
+                    return {"content": f_obj.read()}
+            except Exception as e:
+                api_logger.error(f"Read skill content error: {e}")
+    
+    return {"content": "暂无详细介绍内容。"}
+

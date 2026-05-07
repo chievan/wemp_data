@@ -62,33 +62,59 @@ def run_vectorize_sync(task_id: int):
                 
             try:
                 # 1. Chunk text
-                chunks = old_ingest.chunk_text(md_content)
+                ingest_cfg = cfg.get("ingest", {})
+                chunks = old_ingest.chunk_text(
+                    md_content,
+                    int(ingest_cfg.get("max_chunk_chars", 800)),
+                    int(ingest_cfg.get("min_chunk_chars", 100)),
+                    int(ingest_cfg.get("chunk_overlap_chars", 100))
+                )
                 if not chunks:
                     continue
                     
                 # 2. Embed
-                embeddings = old_ingest.embed_texts([c["text"] for c in chunks], cfg)
+                embed_cfg = cfg["embedding"]
+                api_key = cfg.get("api_keys", {}).get("dashscope", "").strip()
+                from openai import OpenAI
+                client = OpenAI(base_url=embed_cfg["base_url"], api_key=api_key)
+                vectors = old_ingest.embed_texts(client, embed_cfg, chunks)
                 
                 # 3. Insert to DDB
-                chunk_data = []
-                for idx, c in enumerate(chunks):
-                    chunk_data.append({
-                        "chunk_id": f"{aid}__{idx:04d}",
-                        "article_id": aid,
-                        "content_hash": "hash_ph",
-                        "mp_id": row["mp_id"],
-                        "mp_name": row["mp_name"],
-                        "title": row["title"],
-                        "pub_time": datetime.fromtimestamp(int(row["published_at"])),
-                        "source_url": row["source_url"],
-                        "topic_tags": "",
-                        "chunk_no": idx,
-                        "chunk_text": c["text"],
-                        "chunk_len": len(c["text"]),
-                        "embedding": embeddings[idx]
-                    })
+                pub_val = row["published_at"]
+                # 处理可能是时间戳字符串或数字的情况
+                try:
+                    pub_ts = datetime.fromtimestamp(float(pub_val))
+                except:
+                    pub_ts = datetime.now()
                 
-                old_ingest._insert_chunks_to_ddb(ddb_sess, chunk_data, cfg)
+                import pandas as pd
+                pub_month = pd.Timestamp(year=pub_ts.year, month=pub_ts.month, day=1)
+                
+                art_row = {
+                    "pub_month": pub_month, "article_id": aid,
+                    "content_hash": "legacy", "mp_id": row["mp_id"], "mp_name": row["mp_name"],
+                    "title": row["title"], "pub_time": pub_ts, "source_url": row["source_url"],
+                    "file_path": "", "assets_dir": "",
+                    "cover_image": row["cover_cos"] or "", "topic_tags": "未分类",
+                    "content_clean": row["content_clean"] or "", "content_len": len(row["content_clean"] or ""),
+                    "ingested_at": pd.Timestamp.now(),
+                }
+                
+                chunk_rows = [
+                    {
+                        "pub_month": pub_month,
+                        "chunk_id": f"{aid}__{idx:04d}",
+                        "article_id": aid, "content_hash": "legacy",
+                        "mp_id": row["mp_id"], "mp_name": row["mp_name"], "title": row["title"],
+                        "pub_time": pub_ts, "source_url": row["source_url"],
+                        "topic_tags": "未分类", "chunk_no": idx,
+                        "chunk_text": chunk, "chunk_len": len(chunk),
+                        "embedding": vec, "ingested_at": pd.Timestamp.now(),
+                    }
+                    for idx, (chunk, vec) in enumerate(zip(chunks, vectors), 1)
+                ]
+                
+                old_ingest.write_to_ddb(ddb_sess, cfg, art_row, chunk_rows)
                 
                 # Update SQLite status
                 cursor.execute("UPDATE wemp_articles SET embedded = 1 WHERE article_id = ?", (aid,))

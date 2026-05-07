@@ -34,11 +34,30 @@ def search_bocha(query: str, count: int = 8, freshness: str = "noLimit"):
         raw_results = data.get("data", {}).get("webPages", {}).get("value", [])
         
         results = []
+        seen_titles = set()
+        seen_snippets = set()
+
         for item in raw_results:
+            title = item.get("name", "").strip()
+            url = item.get("url", "")
+            snippet = item.get("summary") or item.get("snippet") or ""
+            
+            # 极简去重逻辑：标题完全相同，或摘要前 30 个字符相同（排除空摘要）
+            snippet_key = snippet[:30] if len(snippet) > 30 else snippet
+            
+            if title in seen_titles:
+                continue
+            if snippet_key and snippet_key in seen_snippets:
+                continue
+            
+            seen_titles.add(title)
+            if snippet_key:
+                seen_snippets.add(snippet_key)
+
             results.append({
-                "title": item.get("name"),
-                "url": item.get("url"),
-                "snippet": item.get("summary") or item.get("snippet"),
+                "title": title,
+                "url": url,
+                "snippet": snippet,
                 "source": item.get("siteName", "博查全网检索")
             })
         return results

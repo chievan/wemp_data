@@ -249,7 +249,11 @@ def init_embedding_client(cfg: dict[str, Any]) -> tuple[OpenAI, dict[str, Any]]:
 
 def embed_texts(client: OpenAI, embed_cfg: dict[str, Any], texts: list[str]) -> list[list[float]]:
     vectors: list[list[float]] = []
-    batch_size = int(embed_cfg.get("batch_size", 32))
+    # 强制硬限制：DashScope 接口单次请求最高只能处理 10 个片段
+    batch_size = int(embed_cfg.get("batch_size", 10))
+    if batch_size > 10:
+        batch_size = 10
+    
     expected_dim = int(embed_cfg["dimension"])
     for i in range(0, len(texts), batch_size):
         batch = texts[i : i + batch_size]

@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Any, Iterable, List, Optional
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -17,24 +18,103 @@ class DolphinDBVectorStore(VectorStore):
         self.table_name = table_name
 
     def add_texts(self, texts: Iterable[str], metadatas: Optional[List[dict]] = None, **kwargs: Any) -> List[str]:
-        # Currently, ingestion is handled by ingest_service.py which writes directly to DolphinDB.
-        # So we leave this not implemented or simple log.
-        raise NotImplementedError("For wemp_data, insertion is handled by the dedicated ingest service.")
+        """
+        专用：向 DolphinDB 写入向量块。
+        metadatas 必须包含 schema 要求的关键字段：article_id, mp_name, title, pub_time 等。
+        """
+        import pandas as pd
+        import numpy as np
+        
+        if metadatas is None:
+            raise ValueError("metadatas is required for DolphinDBVectorStore")
+            
+        # 1. 生成 Embeddings (分批处理，兼容 DashScope 单次最高 10 条的限制)
+        texts_list = list(texts)
+        vectors = []
+        batch_size = 10
+        for i in range(0, len(texts_list), batch_size):
+            batch = texts_list[i : i + batch_size]
+            vectors.extend(self.embedding.embed_documents(batch))
+        
+        # 2. 准备数据框
+        rows = []
+        for i, (text, meta, vec) in enumerate(zip(texts, metadatas, vectors)):
+            pub_ts = pd.to_datetime(meta.get("pub_time") or datetime.now())
+            if getattr(pub_ts, "tzinfo", None):
+                pub_ts = pub_ts.tz_localize(None)
+            pub_month = pd.Timestamp(year=pub_ts.year, month=pub_ts.month, day=1)
+            
+            row = {
+                "pub_month": pub_month,
+                "chunk_id": meta.get("chunk_id", str(uuid.uuid4())),
+                "article_id": meta.get("article_id", "manual_upload"),
+                "content_hash": meta.get("content_hash", ""),
+                "mp_id": meta.get("mp_id", "user"),
+                "mp_name": meta.get("mp_name", "用户上传"),
+                "title": meta.get("title", "未命名文档"),
+                "pub_time": pub_ts,
+                "source_url": meta.get("source_url", ""),
+                "topic_tags": meta.get("topic_tags", "未分类"),
+                "chunk_no": meta.get("chunk_no", i + 1),
+                "chunk_text": text,
+                "chunk_len": len(text),
+                "embedding": vec,
+                "ingested_at": pd.Timestamp.now(),
+            }
+            rows.append(row)
+            
+        # 3. 写入 DolphinDB
+        df = pd.DataFrame(rows)
+        # 处理嵌套的 embedding 列表为 arrayVector
+        embeddings = df["embedding"].tolist()
+        n = len(embeddings)
+        dim = len(embeddings[0])
+        flat = np.array(embeddings, dtype=np.float32).flatten()
+        
+        meta_df = df.drop(columns=["embedding"]).copy()
+        meta_df.attrs["__DolphinDB_Type__"] = {"pub_month": ddb.settings.DT_MONTH}
+        
+        var_meta = f"meta_{uuid.uuid4().hex[:8]}"
+        var_flat = f"flat_{uuid.uuid4().hex[:8]}"
+        self.sess.upload({var_meta: meta_df, var_flat: flat})
+        
+        script = f"""
+        idx = (1..{n}) * {dim}
+        embArr = arrayVector(idx, {var_flat})
+        {var_meta}[`embedding] = embArr
+        // 确保列顺序一致
+        reorderColumns!({var_meta}, `pub_month`chunk_id`article_id`content_hash`mp_id`mp_name`title`pub_time`source_url`topic_tags`chunk_no`chunk_text`chunk_len`embedding`ingested_at)
+        loadTable("{self.database_path}", "{self.table_name}").append!({var_meta})
+        """
+        try:
+            self.sess.run(script)
+        finally:
+            self.sess.run(f"undef([`{var_meta}, `{var_flat}])")
+            
+        return [r["chunk_id"] for r in rows]
 
-    def similarity_search(self, query: str, k: int = 4, **kwargs: Any) -> List[Document]:
+    def similarity_search(self, query: str, k: int = 4, filter: Optional[dict] = None, **kwargs: Any) -> List[Document]:
         # Embed the query
         query_embedding = self.embedding.embed_query(query)
         
-        # Upload query vector to DolphinDB session
-        # Generate a unique variable name to avoid conflicts if queried concurrently
-        # (Though ddb.session is not thread-safe by default, we'll keep it simple for now)
         var_name = f"q_vec_{uuid.uuid4().hex}"
         self.sess.upload({var_name: query_embedding})
         
-        # Build exact search SQL using each(dot{, q_vec}, embedding)
-        # Assuming the text column is 'chunk_text'
+        # 构建 Where 子句
+        where_clause = ""
+        if filter:
+            conditions = []
+            for key, val in filter.items():
+                if isinstance(val, str):
+                    conditions.append(f"{key} == '{val}'")
+                else:
+                    conditions.append(f"{key} == {val}")
+            if conditions:
+                where_clause = "where " + " and ".join(conditions)
+
         script = f"""
         tbl = loadTable("{self.database_path}", "{self.table_name}")
+        {f"tbl = select * from tbl {where_clause}" if where_clause else ""}
         res = select *, each(dot{{, {var_name}}}, embedding) as score from tbl
         select * from res order by score desc limit {k}
         """
@@ -42,7 +122,6 @@ class DolphinDBVectorStore(VectorStore):
         try:
             res_df = self.sess.run(script)
         finally:
-            # Clean up the uploaded variable
             self.sess.run(f"undef(`{var_name})")
             
         docs = []
@@ -50,11 +129,8 @@ class DolphinDBVectorStore(VectorStore):
             for _, row in res_df.iterrows():
                 metadata = row.to_dict()
                 page_content = metadata.pop("chunk_text", "")
-                
-                # Remove embedding from metadata to save memory
                 if "embedding" in metadata:
                     del metadata["embedding"]
-                
                 docs.append(Document(page_content=page_content, metadata=metadata))
                 
         return docs

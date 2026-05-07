@@ -13,6 +13,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from api.core.config import settings
 from api.core.dolphindb_vectorstore import DolphinDBVectorStore
 from core.logger import api_logger
+from brain.prompts.knowledge_base import KNOWLEDGE_SYSTEM_PROMPT, KNOWLEDGE_USER_TEMPLATE
+
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -21,12 +23,12 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     enable_web: bool = False
     model: str = "deepseek-v4-flash"
+    filter_article_id: Optional[str] = None
 
-# Initialize Embeddings
-embeddings = DashScopeEmbeddings(
-    dashscope_api_key=settings.EMBEDDING_API_KEY,
-    model=settings.EMBEDDING_MODEL
-)
+from api.core.embeddings import embeddings
+from api.core.database import SessionLocal
+from api.models.chat import ChatSession
+
 
 def get_llm(model_name: str = "deepseek-v4-flash"):
     provider_config = {
@@ -35,9 +37,41 @@ def get_llm(model_name: str = "deepseek-v4-flash"):
     }
     return ChatOpenAI(model=model_name, streaming=True, **provider_config)
 
+@router.post("/session")
+async def create_or_update_session(request: dict):
+    """创建或更新会话元数据（如绑定文章ID）"""
+    sid = request.get("session_id")
+    aid = request.get("article_id")
+    title = request.get("title")
+    if not sid:
+        raise HTTPException(status_code=400, detail="session_id is required")
+    
+    db = SessionLocal()
+    try:
+        session = db.query(ChatSession).filter(ChatSession.session_id == sid).first()
+        if not session:
+            session = ChatSession(session_id=sid, article_id=aid, title=title)
+            db.add(session)
+        else:
+            if aid: session.article_id = aid
+            if title: session.title = title
+        db.commit()
+        return {"status": "success", "session_id": sid, "article_id": session.article_id}
+    finally:
+        db.close()
+
 @router.post("")
 async def chat_with_docs(request: ChatRequest):
     try:
+        # 0. 检查会话深度绑定的文章
+        effective_article_id = request.filter_article_id
+        if not effective_article_id and request.session_id:
+            db = SessionLocal()
+            session = db.query(ChatSession).filter(ChatSession.session_id == request.session_id).first()
+            if session and session.article_id:
+                effective_article_id = session.article_id
+            db.close()
+
         # 1. 技能识别与 Prompt 注入 (@skill)
         persona_prompt = ""
         target_name = ""
@@ -63,7 +97,10 @@ async def chat_with_docs(request: ChatRequest):
         sess = ddb.session()
         sess.connect(host=settings.DDB_HOST, port=int(settings.DDB_PORT), userid=settings.DDB_USER, password=settings.DDB_PASSWORD)
         vector_store = DolphinDBVectorStore(session=sess, embedding=embeddings, database_path=settings.DDB_DATABASE, table_name=settings.DDB_CHUNKS_TABLE)
-        docs = vector_store.similarity_search(request.message, k=5)
+        
+        k_value = 10 if effective_article_id else 5
+        search_filter = {"article_id": effective_article_id} if effective_article_id else None
+        docs = vector_store.similarity_search(request.message, k=k_value, filter=search_filter)
         sess.close()
 
         # 3. 联网搜索
@@ -82,14 +119,20 @@ async def chat_with_docs(request: ChatRequest):
         final_context = "\n\n".join(context_parts) if context_parts else "暂无参考资料。"
 
         # 5. 构建 System Prompt
-        base_system = "你是一个专业的金融投研助手。基于以下检索到的上下文资料来回答用户的问题。如果你不知道答案，就说你不知道。"
         if persona_prompt:
-            base_system = f"你现在正在扮演一个特定的金融专家。请严格按照以下专家设定的研究框架、逻辑偏好和语言风格来回答问题。\n{persona_prompt}\n\n基于以下资料回答:"
+            # 如果有专家分身，将分身设定与基础知识库要求结合
+            base_system = f"你现在正在扮演一个特定的金融专家。请严格按照以下专家设定回答问题。\n{persona_prompt}\n\n{KNOWLEDGE_SYSTEM_PROMPT}"
+        elif effective_article_id:
+            # 专项问答模式下的提示词增强
+            base_system = f"你现在是这份特定研究报告的分析专家。请严格基于提供的资料进行深度分析和回答，不要引用资料以外的常识，如果资料中没有提到相关信息，请直接说明。\n\n{KNOWLEDGE_SYSTEM_PROMPT}"
+        else:
+            base_system = KNOWLEDGE_SYSTEM_PROMPT
         
         full_prompt = ChatPromptTemplate.from_messages([
             ("system", base_system),
-            ("human", "上下文:\n{context}\n\n问题: {input}"),
+            ("human", KNOWLEDGE_USER_TEMPLATE),
         ])
+
 
         # 6. 流式返回
         async def generate():
@@ -97,7 +140,7 @@ async def chat_with_docs(request: ChatRequest):
                 yield f"✨ 已激活专家分身：`@{target_name}`\n\n"
             
             current_llm = get_llm(request.model)
-            formatted = full_prompt.format_messages(context=final_context, input=request.message)
+            formatted = full_prompt.format_messages(context=final_context, query=request.message)
             async for chunk in current_llm.astream(formatted):
                 if chunk.content: yield chunk.content
             
@@ -108,11 +151,11 @@ async def chat_with_docs(request: ChatRequest):
                 for i, d in enumerate(docs):
                     title = d.metadata.get('title','本地资料')[:50]
                     url = d.metadata.get('source_url','#')
-                    refs += f"{i+1}. {title} [来源]({url})\n"
+                    refs += f"{i+1}. [{title}]({url}) (本地知识库)\n"
                 # 联网搜索
                 for i, item in enumerate(web_results):
                     idx = i + len(docs) + 1
-                    refs += f"{idx}. {item['title'][:50]} [网络搜索]({item['url']})\n"
+                    refs += f"{idx}. [{item['title'][:50]}]({item['url']}) (网络搜索)\n"
                 yield refs
                     
         return StreamingResponse(generate(), media_type="text/event-stream")

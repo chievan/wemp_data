@@ -248,7 +248,7 @@ def get_committee_graph():
             final_content += "\n\n参考资料：\n"
             for i, s in enumerate(sources[:8]):
                 idx = i + 1
-                final_content += f"* [{idx}] [{s['title']}]({s['link']})\n"
+                final_content += f"* [{idx}] [{s['title']}]({s['link']}) ({s['type']})\n"
         
         return {
             "messages": [AIMessage(content=expert_thought, name=f"{expert_name}_Thought"), AIMessage(content=final_content, name=expert_name)],
