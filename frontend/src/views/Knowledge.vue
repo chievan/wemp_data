@@ -35,8 +35,6 @@ const splitContent = (content: string) => {
 
 const route = useRoute()
 const router = useRouter()
-const activeFilterArticleId = ref<string | null>(null)
-const activeFilterTitle = ref<string | null>(null)
 
 const enableWeb = ref(true)
 const selectedModel = ref('deepseek-v4-flash')
@@ -47,6 +45,8 @@ interface ChatSession {
   id: string
   title: string
   messages: {role: 'user'|'assistant', content: string}[]
+  articleId?: string
+  articleTitle?: string
 }
 
 const chatSessions = ref<ChatSession[]>([])
@@ -72,11 +72,13 @@ const saveSessions = () => {
   localStorage.setItem('wemp_chat_sessions', JSON.stringify(chatSessions.value))
 }
 
-const createNewSession = (title = '新对话') => {
+const createNewSession = (title = '新对话', articleId?: string, articleTitle?: string) => {
   const newSession: ChatSession = {
     id: generateId(),
     title: title,
-    messages: [{ role: 'assistant', content: '您好，我是基于 DolphinDB 向量检索的投研知识库助手。请问有什么可以帮您？' }]
+    messages: [{ role: 'assistant', content: '您好，我是基于 DolphinDB 向量检索的投研知识库助手。请问有什么可以帮您？' }],
+    articleId: articleId,
+    articleTitle: articleTitle
   }
   chatSessions.value.unshift(newSession)
   currentSessionId.value = newSession.id
@@ -105,10 +107,16 @@ const removeSession = (id: string, event: Event) => {
   }
 }
 
-const currentMessages = computed(() => {
-  const session = chatSessions.value.find(s => s.id === currentSessionId.value)
-  return session ? session.messages : []
+const currentSession = computed(() => {
+  return chatSessions.value.find(s => s.id === currentSessionId.value)
 })
+
+const currentMessages = computed(() => {
+  return currentSession.value ? currentSession.value.messages : []
+})
+
+const activeFilterArticleId = computed(() => currentSession.value?.articleId || null)
+const activeFilterTitle = computed(() => currentSession.value?.articleTitle || null)
 
 const currentInput = ref('')
 const isChatting = ref(false)
@@ -141,9 +149,9 @@ const sendMessage = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         message: msg, 
-        enable_web: activeFilterArticleId.value ? false : enableWeb.value, // 如果指定研报，默认关闭联网
+        enable_web: session.articleId ? false : enableWeb.value, // 如果指定研报，默认关闭联网
         model: selectedModel.value,
-        filter_article_id: activeFilterArticleId.value
+        filter_article_id: session.articleId
       })
 
     })
@@ -223,8 +231,11 @@ const selectSkill = (skillId: string) => {
 }
 
 const clearFilter = () => {
-  activeFilterArticleId.value = null
-  activeFilterTitle.value = null
+  if (currentSession.value) {
+    currentSession.value.articleId = undefined
+    currentSession.value.articleTitle = undefined
+    saveSessions()
+  }
   router.replace({ query: {} })
 }
 
@@ -233,23 +244,19 @@ onMounted(() => {
   fetchSkills()
   
   if (route.query.article_id) {
-    activeFilterArticleId.value = route.query.article_id as string
-    activeFilterTitle.value = route.query.title as string
+    const aid = route.query.article_id as string
+    const atitle = route.query.title as string
     enableWeb.value = false 
     // 强制开启新专项对话
-    createNewSession(`【专项】${activeFilterTitle.value}`)
+    createNewSession(`【专项】${atitle}`, aid, atitle)
   }
 })
 
 watch(() => route.query.article_id, (newId) => {
   if (newId) {
-    activeFilterArticleId.value = newId as string
-    activeFilterTitle.value = route.query.title as string
+    const atitle = route.query.title as string
     enableWeb.value = false
-    createNewSession(`【专项】${activeFilterTitle.value}`)
-  } else {
-    activeFilterArticleId.value = null
-    activeFilterTitle.value = null
+    createNewSession(`【专项】${atitle}`, newId as string, atitle)
   }
 })
 
