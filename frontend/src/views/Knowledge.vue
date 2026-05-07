@@ -246,17 +246,35 @@ onMounted(() => {
   if (route.query.article_id) {
     const aid = route.query.article_id as string
     const atitle = route.query.title as string
-    enableWeb.value = false 
-    // 强制开启新专项对话
-    createNewSession(`【专项】${atitle}`, aid, atitle)
+    
+    // 检查是否已经存在针对该研报的对话
+    const existing = chatSessions.value.find(s => s.articleId === aid)
+    if (existing) {
+      currentSessionId.value = existing.id
+    } else {
+      enableWeb.value = false 
+      createNewSession(`【专项】${atitle}`, aid, atitle)
+    }
+    
+    // 清理 URL 参数，防止刷新重复触发
+    router.replace({ path: route.path, query: {} })
   }
 })
 
 watch(() => route.query.article_id, (newId) => {
   if (newId) {
+    const aid = newId as string
     const atitle = route.query.title as string
-    enableWeb.value = false
-    createNewSession(`【专项】${atitle}`, newId as string, atitle)
+    
+    const existing = chatSessions.value.find(s => s.articleId === aid)
+    if (existing) {
+      currentSessionId.value = existing.id
+    } else {
+      enableWeb.value = false
+      createNewSession(`【专项】${atitle}`, aid, atitle)
+    }
+    
+    router.replace({ path: route.path, query: {} })
   }
 })
 
