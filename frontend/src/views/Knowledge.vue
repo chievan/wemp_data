@@ -149,7 +149,7 @@ const sendMessage = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         message: msg, 
-        enable_web: session.articleId ? false : enableWeb.value, // 如果指定研报，默认关闭联网
+        enable_web: enableWeb.value, 
         model: selectedModel.value,
         filter_article_id: session.articleId
       })
