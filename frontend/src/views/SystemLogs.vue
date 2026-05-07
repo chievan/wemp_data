@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import axios from 'axios'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api/v1'
@@ -9,6 +9,7 @@ const activeLogKey = ref('')
 const logContent = ref<string[]>([])
 const logsLoading = ref(false)
 const tailLines = ref(200)
+const isReversed = ref(true) // 默认开启倒序，最新的在上面
 
 const fetchLogFiles = async () => {
   try {
@@ -35,6 +36,13 @@ const fetchLogContent = async (key: string) => {
     logsLoading.value = false
   }
 }
+
+const displayLogs = computed(() => {
+  if (isReversed.value) {
+    return [...logContent.value].reverse()
+  }
+  return logContent.value
+})
 
 onMounted(() => {
   fetchLogFiles()
@@ -65,16 +73,20 @@ onMounted(() => {
              </span>
           </div>
         </div>
-        <div class="flex gap-2">
+        <div class="flex items-center gap-3">
+          <label class="flex items-center gap-2 text-xs font-bold text-slate-500 cursor-pointer hover:text-blue-600 transition-colors bg-white px-3 py-1.5 rounded-lg border border-slate-200">
+            <input type="checkbox" v-model="isReversed" class="w-3.5 h-3.5 text-blue-600 rounded border-slate-300">
+            最新的在最上方
+          </label>
           <select 
             v-model="tailLines" 
             @change="fetchLogContent(activeLogKey)"
             class="bg-white border border-slate-300 text-slate-700 text-xs font-bold rounded-lg py-1.5 px-3 focus:ring-0 cursor-pointer outline-none"
           >
-            <option :value="100">最后 100 行</option>
-            <option :value="200">最后 200 行</option>
-            <option :value="500">最后 500 行</option>
-            <option :value="1000">最后 1000 行</option>
+            <option :value="100">查看 100 行</option>
+            <option :value="200">查看 200 行</option>
+            <option :value="500">查看 500 行</option>
+            <option :value="1000">查看 1000 行</option>
           </select>
           <button 
             @click="fetchLogContent(activeLogKey)"
@@ -93,8 +105,8 @@ onMounted(() => {
             正在实时拉取日志内容...
           </div>
           <div v-else-if="logContent.length === 0" class="text-slate-500 italic py-10 text-center">暂无日志内容</div>
-          <div v-for="(line, idx) in logContent" :key="idx" class="whitespace-pre-wrap mb-1 border-l-2 border-slate-800 pl-4 hover:border-blue-500 transition-colors">
-            <span class="text-slate-600 mr-4 select-none opacity-50">{{ idx + 1 }}</span>
+          <div v-for="(line, idx) in displayLogs" :key="idx" class="whitespace-pre-wrap mb-1 border-l-2 border-slate-800 pl-4 hover:border-blue-500 transition-colors">
+            <span class="text-slate-600 mr-4 select-none opacity-50 w-8 inline-block">{{ isReversed ? logContent.length - idx : idx + 1 }}</span>
             <span :class="line.includes('ERROR') || line.includes('CRITICAL') ? 'text-red-400 font-bold' : line.includes('WARNING') ? 'text-amber-300' : ''">
               {{ line }}
             </span>
