@@ -5,15 +5,15 @@
 # 1. 核心数据源 (we-mp-rss)
 base_url: "http://127.0.0.1:8001"
 we_mp_rss:
-  access_key: "${WEMP_ACCESS_KEY:-WKiMgHhV7xsRLTnHtIXUlubddJGqSdVsOx}"
-  secret_key: "${WEMP_SECRET_KEY:-SKnxmmkg_9ec8lxhRq-31QOjjKBQgCYRs2}"
+  access_key: "${WEMP_ACCESS_KEY:-}"
+  secret_key: "${WEMP_SECRET_KEY:-}"
 database_url: "sqlite:///./data/wemp_data.db"
 
 # 2. 腾讯云 COS (图片存储)
 tencent_cos:
   enabled: true
-  secret_id: "${COS_SECRET_ID:-AKIDcdcP71oQtEPO9i1KnBUeliWAj9SZdaNH}"
-  secret_key: "${COS_SECRET_KEY:-qY6WlrncHsKcmnfP2WQOFwfR6bbVwDLp}"
+  secret_id: "${COS_SECRET_ID:-}"
+  secret_key: "${COS_SECRET_KEY:-}"
   region: "ap-shanghai"
   bucket: "wemp-images-1256161020"
 
@@ -22,7 +22,7 @@ dolphindb:
   host: "127.0.0.1"
   port: 8848
   user: "admin"
-  password: "${DDB_PASSWORD:-123456}"
+  password: "${DDB_PASSWORD:-}"
   database: "dfs://wemp_vector"
   articles_table: "wemp_articles"
   chunks_table: "wemp_chunks"
@@ -39,9 +39,9 @@ embedding:
 
 # 5. API 密钥统一管理
 api_keys:
-  dashscope: "${DASHSCOPE_API_KEY:-sk-b939dd5250884d768ed2c557b536a425}"
-  deepseek: "${DEEPSEEK_API_KEY:-sk-c9997f34ff324b5db40f982889d8504a}"
-  bocha_search: "${BOCHA_API_KEY:-sk-76d63bb45c2947179305daf3e5cde5b8}"
+  dashscope: "${DASHSCOPE_API_KEY:-}"
+  deepseek: "${DEEPSEEK_API_KEY:-}"
+  bocha_search: "${BOCHA_API_KEY:-}"
 
 # 6. 运行参数
 feed_batch_size: 30

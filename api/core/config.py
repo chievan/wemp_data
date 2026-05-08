@@ -51,10 +51,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str = _yaml_cfg.get("database_url", "sqlite:///./data/wemp_data.db")
     
     # DolphinDB
-    DDB_HOST: str = os.environ.get("WEMP_HOST", "106.54.219.69")
+    DDB_HOST: str = os.environ.get("WEMP_HOST", "")
     DDB_PORT: int = _yaml_cfg.get("dolphindb", {}).get("port", 8848)
     DDB_USER: str = _yaml_cfg.get("dolphindb", {}).get("user", "admin")
-    DDB_PASSWORD: str = _yaml_cfg.get("dolphindb", {}).get("password", "123456")
+    DDB_PASSWORD: str = _yaml_cfg.get("dolphindb", {}).get("password", "")
     DDB_DATABASE: str = _yaml_cfg.get("dolphindb", {}).get("database", "dfs://wemp_vector")
     DDB_CHUNKS_TABLE: str = _yaml_cfg.get("dolphindb", {}).get("chunks_table", "wemp_chunks")
     
