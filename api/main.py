@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,7 +26,6 @@ with engine.connect() as conn:
     conn.commit()
 
 async def background_task_worker():
-    from datetime import datetime
     api_logger.info("Background worker started...")
     while True:
         db = None
