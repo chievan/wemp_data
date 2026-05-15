@@ -120,6 +120,10 @@ def run_ingest_sync(task_id: int, limit: int = 0, force: bool = False, skip_ddb:
             article = api.get_article(aid)
             if not article:
                 counts["error"] += 1
+                list_item = api_id_to_item.get(aid, {})
+                title = list_item.get("title", aid)
+                url = list_item.get("url", "")
+                log_to_db(f"❌ 拉取失败: {title[:50]} | {url}")
                 processed += 1
                 continue
 
