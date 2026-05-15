@@ -33,47 +33,57 @@ async def background_task_worker():
         db = None
         try:
             db = SessionLocal()
-            # ─── 清理僵尸任务：running 超过 30 分钟的 ───
+            # ─── 清理僵尸任务：running 超过 30 分钟的（用 SQL 避免 detached 对象问题）───
             cutoff = (datetime.utcnow() - timedelta(seconds=ZOMBIE_TIMEOUT)).isoformat()
-            zombies = db.query(IngestTask).filter(
-                IngestTask.status == "running",
-                IngestTask.created_at < cutoff
-            ).all()
-            for z in zombies:
-                api_logger.warning(f"Zombie task #{z.id} ({z.task_type}) detected, marking as failed")
-                z.status = "failed"
-                z.logs = (z.logs or "") + f"\n[SYSTEM] Marked as zombie (running > {ZOMBIE_TIMEOUT}s)"
-                z.completed_at = datetime.utcnow()
-            if zombies:
-                db.commit()
+            result = db.execute(sa_text(
+                "UPDATE task_queue SET status = 'failed', "
+                "logs = COALESCE(logs, '') || :msg, "
+                "completed_at = :now "
+                "WHERE status = 'running' AND created_at < :cutoff"
+            ), {"msg": f"\n[SYSTEM] Marked as zombie (running > {ZOMBIE_TIMEOUT}s)",
+                "now": datetime.utcnow().isoformat(), "cutoff": cutoff})
+            db.commit()
+            if result.rowcount > 0:
+                api_logger.warning(f"Cleaned up {result.rowcount} zombie task(s)")
 
             # ─── 执行 pending 任务 ───
             task = db.query(IngestTask).filter(IngestTask.status == "pending").order_by(IngestTask.created_at.asc()).first()
             if task:
+                task_id = task.id  # 先保存 ID
+                task_type = task.task_type  # 先保存 type
+                task_params = task.params  # 先保存 params
                 task.status = "running"
                 db.commit()
                 db.close()  # 任务开始前先释放连接
                 db = None
                 try:
-                    if task.task_type == "ingest":
+                    if task_type == "ingest":
                         from api.services.ingest_task_runner import execute_ingest_task
-                        await execute_ingest_task(task.id, task.params)
-                    elif task.task_type == "vectorize":
+                        await execute_ingest_task(task_id, task_params)
+                    elif task_type == "vectorize":
                         from api.services.vectorize_task_runner import execute_vectorize_task
-                        await execute_vectorize_task(task.id)
+                        await execute_vectorize_task(task_id)
                     db = SessionLocal()
-                    task = db.query(IngestTask).filter(IngestTask.id == task.id).first()
-                    task.status = "completed"
-                    task.completed_at = datetime.utcnow()
-                    db.commit()
+                    task = db.query(IngestTask).filter(IngestTask.id == task_id).first()
+                    if task:
+                        task.status = "completed"
+                        task.completed_at = datetime.utcnow()
+                        db.commit()
+                    else:
+                        db.close()
                 except Exception as task_err:
-                    api_logger.error(f"Task {task.id} failed: {task_err}")
+                    api_logger.error(f"Task {task_id} failed: {task_err}")
+                    if db:
+                        db.close()
                     db = SessionLocal()
-                    task = db.query(IngestTask).filter(IngestTask.id == task.id).first()
-                    task.status = "failed"
-                    task.logs = (str(task_err) + "\n")[:2000]
-                    task.completed_at = datetime.utcnow()
-                    db.commit()
+                    task = db.query(IngestTask).filter(IngestTask.id == task_id).first()
+                    if task:
+                        task.status = "failed"
+                        task.logs = (str(task_err) + "\n")[:2000]
+                        task.completed_at = datetime.utcnow()
+                        db.commit()
+                    else:
+                        db.close()
         except Exception as e:
             api_logger.error(f"Worker error: {e}")
         finally:
