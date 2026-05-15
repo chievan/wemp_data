@@ -107,11 +107,11 @@ def upload_to_cos(client, bucket: str, region: str, data: bytes, key: str) -> st
 # ─────────────────────────── API Client ──────────────────────────
 
 class WempApi:
-    def __init__(self, base_url: str, username: str = None, password: str = None, access_key: str = None, secret_key: str = None):
+    def __init__(self, base_url: str, username: str = None, password: str = None, access_key: str = None, secret_key: str = None, basic_auth: str = None):
         self.base = base_url.rstrip("/")
         self.sess = requests.Session()
         self.sess.headers["User-Agent"] = "wemp-pipeline/2.0"
-        
+
         if access_key and secret_key:
             self.sess.headers["Authorization"] = f"AK-SK {access_key}:{secret_key}"
             logger.info("✅ API 使用 AK/SK 认证成功")
@@ -119,7 +119,7 @@ class WempApi:
             resp = self.sess.post(
                 f"{self.base}/api/v1/wx/auth/token",
                 data={"grant_type": "password", "username": username, "password": password},
-                auth=("basic", "123456"), timeout=30,
+                auth=("basic", basic_auth or ""), timeout=30,
             )
             resp.raise_for_status()
             self.sess.headers["Authorization"] = f"Bearer {resp.json()['access_token']}"
@@ -484,7 +484,7 @@ def main() -> int:
     parser.add_argument("--dest-db", type=Path, default=Path("./data/wemp_data.db"))
     parser.add_argument("--api-url", default="http://localhost:8001")
     parser.add_argument("--api-user", default="admin")
-    parser.add_argument("--api-pass", default="admin@123")
+    parser.add_argument("--api-pass", default="")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--force", action="store_true", help="强制重新处理已完成的文章")
     parser.add_argument("--skip-ddb", action="store_true", help="跳过 DolphinDB 写入（只做 SQLite）")

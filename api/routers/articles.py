@@ -107,7 +107,7 @@ def get_stats():
         print("Local stats error:", e)
 
     try:
-        api_url = _yaml_cfg.get("base_url", "http://106.54.219.69:8001").rstrip("/")
+        api_url = _yaml_cfg.get("base_url", "http://127.0.0.1:8001").rstrip("/")
         we_mp_rss_cfg = _yaml_cfg.get("we_mp_rss", {})
         ak = we_mp_rss_cfg.get("access_key")
         sk = we_mp_rss_cfg.get("secret_key")
@@ -118,7 +118,8 @@ def get_stats():
         else:
             username = "admin"
             password = "123"
-            resp = sess.post(f"{api_url}/api/v1/wx/auth/token", data={"grant_type": "password", "username": username, "password": password}, auth=("basic", "123456"), timeout=5)
+            basic_auth = we_mp_rss_cfg.get("basic_auth", "")
+            resp = sess.post(f"{api_url}/api/v1/wx/auth/token", data={"grant_type": "password", "username": username, "password": password}, auth=("basic", basic_auth), timeout=5)
             if resp.status_code == 200:
                 sess.headers["Authorization"] = f"Bearer {resp.json()['access_token']}"
         

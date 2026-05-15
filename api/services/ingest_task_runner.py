@@ -60,9 +60,10 @@ def run_ingest_sync(task_id: int, limit: int = 0, force: bool = False, skip_ddb:
         
         # Wemp API user credentials (from config)
         wemp_creds = cfg.get("we_mp_rss", {})
-        api_user = wemp_creds.get("access_key", "admin")
-        api_pass = wemp_creds.get("secret_key", "admin@123")
-        api = old_ingest.WempApi(api_url, api_user, api_pass)
+        ak = wemp_creds.get("access_key")
+        sk = wemp_creds.get("secret_key")
+        basic_auth = wemp_creds.get("basic_auth", "")
+        api = old_ingest.WempApi(api_url, access_key=ak, secret_key=sk, basic_auth=basic_auth)
 
         ddb_sess = None
         if not skip_ddb:
