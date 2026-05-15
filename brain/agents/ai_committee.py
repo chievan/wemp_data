@@ -252,7 +252,6 @@ def get_committee_graph():
         
         return {
             "messages": [AIMessage(content=expert_thought, name=f"{expert_name}_Thought"), AIMessage(content=final_content, name=expert_name)],
-            "turns": state.get("turns", 0) + 1
         }
 
     # 3. 构建图

@@ -1,6 +1,6 @@
 import os
 import re
-import dolphindb as ddb
+from brain.logic.session_manager import get_ddb_session
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -94,14 +94,13 @@ async def chat_with_docs(request: ChatRequest):
                         break
             
         # 2. 知识库检索 (RAG)
-        sess = ddb.session()
-        sess.connect(host=settings.DDB_HOST, port=int(settings.DDB_PORT), userid=settings.DDB_USER, password=settings.DDB_PASSWORD)
+        sess = get_ddb_session()
         vector_store = DolphinDBVectorStore(session=sess, embedding=embeddings, database_path=settings.DDB_DATABASE, table_name=settings.DDB_CHUNKS_TABLE)
         
         k_value = 10 if effective_article_id else 5
         search_filter = {"article_id": effective_article_id} if effective_article_id else None
         docs = vector_store.similarity_search(request.message, k=k_value, filter=search_filter)
-        sess.close()
+        # 不关闭 sess：由 get_ddb_session() 统一管理生命周期
 
         # 3. 联网搜索
         web_results = []

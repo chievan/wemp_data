@@ -3,7 +3,7 @@
 # ============================================================
 
 # 1. 核心数据源 (we-mp-rss)
-base_url: "http://${WEMP_HOST:-106.54.219.69}:8001"
+base_url: "http://${WEMP_HOST:-127.0.0.1}:8001"
 database_url: "sqlite:///./data/wemp_data.db"
 
 # 2. 腾讯云 COS (图片存储)
@@ -16,10 +16,10 @@ tencent_cos:
 
 # 3. DolphinDB 向量数据库
 dolphindb:
-  host: "${WEMP_HOST:-106.54.219.69}"
+  host: "${WEMP_HOST:-127.0.0.1}"
   port: 8848
   user: "admin"
-  password: "123456"
+  password: "${DDB_PASSWORD:-CHANGE_ME}"
   database: "dfs://wemp_vector"
   articles_table: "wemp_articles"
   chunks_table: "wemp_chunks"

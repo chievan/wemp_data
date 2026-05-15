@@ -58,8 +58,11 @@ def run_ingest_sync(task_id: int, limit: int = 0, force: bool = False, skip_ddb:
         # The base URL should be loaded from config
         api_url = cfg.get("base_url", "http://localhost:8001")
         
-        # Wemp API user credentials (fallback to admin/admin@123)
-        api = old_ingest.WempApi(api_url, "admin", "admin@123")
+        # Wemp API user credentials (from config)
+        wemp_creds = cfg.get("we_mp_rss", {})
+        api_user = wemp_creds.get("access_key", "admin")
+        api_pass = wemp_creds.get("secret_key", "admin@123")
+        api = old_ingest.WempApi(api_url, api_user, api_pass)
 
         ddb_sess = None
         if not skip_ddb:

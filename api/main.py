@@ -13,6 +13,7 @@ from core.logger import api_logger
 Base.metadata.create_all(bind=engine)
 
 async def background_task_worker():
+    from datetime import datetime
     api_logger.info("Background worker started...")
     while True:
         try:
@@ -21,16 +22,22 @@ async def background_task_worker():
             if task:
                 task.status = "running"
                 db.commit()
-                if task.task_type == "ingest":
-                    from api.services.ingest_task_runner import execute_ingest_task
-                    await execute_ingest_task(task.id, task.params)
-                elif task.task_type == "vectorize":
-                    from api.services.vectorize_task_runner import execute_vectorize_task
-                    await execute_vectorize_task(task.id)
-                task.status = "completed"
-                from datetime import datetime
-                task.completed_at = datetime.utcnow()
-                db.commit()
+                try:
+                    if task.task_type == "ingest":
+                        from api.services.ingest_task_runner import execute_ingest_task
+                        await execute_ingest_task(task.id, task.params)
+                    elif task.task_type == "vectorize":
+                        from api.services.vectorize_task_runner import execute_vectorize_task
+                        await execute_vectorize_task(task.id)
+                    task.status = "completed"
+                    task.completed_at = datetime.utcnow()
+                    db.commit()
+                except Exception as task_err:
+                    api_logger.error(f"Task {task.id} failed: {task_err}")
+                    task.status = "failed"
+                    task.logs = str(task_err)[:2000]
+                    task.completed_at = datetime.utcnow()
+                    db.commit()
             db.close()
         except Exception as e:
             api_logger.error(f"Worker error: {e}")
