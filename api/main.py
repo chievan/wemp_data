@@ -28,12 +28,15 @@ async def background_task_worker():
     from datetime import datetime
     api_logger.info("Background worker started...")
     while True:
+        db = None
         try:
             db = SessionLocal()
             task = db.query(IngestTask).filter(IngestTask.status == "pending").order_by(IngestTask.created_at.asc()).first()
             if task:
                 task.status = "running"
                 db.commit()
+                db.close()  # 任务开始前先释放连接
+                db = None
                 try:
                     if task.task_type == "ingest":
                         from api.services.ingest_task_runner import execute_ingest_task
@@ -41,18 +44,24 @@ async def background_task_worker():
                     elif task.task_type == "vectorize":
                         from api.services.vectorize_task_runner import execute_vectorize_task
                         await execute_vectorize_task(task.id)
+                    db = SessionLocal()
+                    task = db.query(IngestTask).filter(IngestTask.id == task.id).first()
                     task.status = "completed"
                     task.completed_at = datetime.utcnow()
                     db.commit()
                 except Exception as task_err:
                     api_logger.error(f"Task {task.id} failed: {task_err}")
+                    db = SessionLocal()
+                    task = db.query(IngestTask).filter(IngestTask.id == task.id).first()
                     task.status = "failed"
                     task.logs = str(task_err)[:2000]
                     task.completed_at = datetime.utcnow()
                     db.commit()
-            db.close()
         except Exception as e:
             api_logger.error(f"Worker error: {e}")
+        finally:
+            if db:
+                db.close()
         await asyncio.sleep(5)
 
 async def scheduled_ingest_worker():

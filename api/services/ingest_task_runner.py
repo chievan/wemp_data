@@ -12,10 +12,13 @@ from api.core.database import SessionLocal
 from api.models.task import IngestTask
 from core.logger import ingest_logger as logger
 
-def run_ingest_sync(task_id: int, limit: int = 0, force: bool = False, skip_ddb: bool = False):
+def run_ingest_sync(task_id: int, limit: int = 0, force: bool = False, skip_ddb: bool = False, incremental: bool = False):
     """
     Synchronous function that runs the old ingest pipeline logic.
     We pass in the original YAML config dictionary because old_ingest heavily relies on it.
+
+    Args:
+        incremental: 如果为 True，只拉取 API 第一页（最新 100 篇），适合高频定时任务（5分钟）。
     """
     db_session = SessionLocal()
     task = db_session.query(IngestTask).filter(IngestTask.id == task_id).first()
@@ -33,8 +36,10 @@ def run_ingest_sync(task_id: int, limit: int = 0, force: bool = False, skip_ddb:
         except Exception:
             pass
 
-    log_to_db(f"Starting ingest task {task_id}. limit={limit}, force={force}, skip_ddb={skip_ddb}")
+    log_to_db(f"Starting ingest task {task_id}. limit={limit}, force={force}, skip_ddb={skip_ddb}, incremental={incremental}")
 
+    dest_conn = None
+    ddb_sess = None
     try:
         cfg = _yaml_cfg
         cos_cfg = cfg.get("tencent_cos", {})
@@ -42,7 +47,7 @@ def run_ingest_sync(task_id: int, limit: int = 0, force: bool = False, skip_ddb:
             raise ValueError("tencent_cos.enabled is not true in config")
 
         cos_client, bucket, region = old_ingest.build_cos_client(cos_cfg)
-        
+
         import requests
         img_sess = requests.Session()
         img_sess.headers["User-Agent"] = "Mozilla/5.0"
@@ -51,13 +56,13 @@ def run_ingest_sync(task_id: int, limit: int = 0, force: bool = False, skip_ddb:
         # We reuse the raw sqlite3 connection for compatibility with old_ingest.py
         db_path = settings.DATABASE_URL.replace("sqlite:///", "")
         old_ingest.init_db(Path(db_path))
-        dest_conn = sqlite3.connect(db_path)
+        dest_conn = sqlite3.connect(db_path, timeout=30)
         dest_conn.row_factory = sqlite3.Row
 
         # API setup
         # The base URL should be loaded from config
         api_url = cfg.get("base_url", "http://localhost:8001")
-        
+
         # Wemp API user credentials (from config)
         wemp_creds = cfg.get("we_mp_rss", {})
         ak = wemp_creds.get("access_key")
@@ -65,7 +70,6 @@ def run_ingest_sync(task_id: int, limit: int = 0, force: bool = False, skip_ddb:
         basic_auth = wemp_creds.get("basic_auth", "")
         api = old_ingest.WempApi(api_url, access_key=ak, secret_key=sk, basic_auth=basic_auth)
 
-        ddb_sess = None
         if not skip_ddb:
             try:
                 ddb_sess = old_ingest.connect_ddb(cfg)
@@ -73,7 +77,7 @@ def run_ingest_sync(task_id: int, limit: int = 0, force: bool = False, skip_ddb:
             except Exception as e:
                 log_to_db(f"DolphinDB connection failed: {e}")
 
-        # ─── 阶段 1: 批量获取所有 API 文章 ID（只拿 ID，不做详情请求）───
+        # ─── 阶段 1: 批量获取 API 文章 ID（只拿 ID，不做详情请求）───
         log_to_db("Fetching all article IDs from API...")
         all_api_ids = set()
         api_id_to_item = {}  # id -> item 映射，用于补充 get_article 缺失的字段
@@ -88,6 +92,10 @@ def run_ingest_sync(task_id: int, limit: int = 0, force: bool = False, skip_ddb:
                 all_api_ids.add(item["id"])
                 api_id_to_item[item["id"]] = item
             if len(items) < page_size:
+                break
+            # 增量模式：只拉第一页（最新 100 篇）
+            if incremental:
+                log_to_db(f"Incremental mode: fetched {len(all_api_ids)} articles from latest page")
                 break
             offset += page_size
         log_to_db(f"Total articles in API: {len(all_api_ids)}")
@@ -152,8 +160,7 @@ def run_ingest_sync(task_id: int, limit: int = 0, force: bool = False, skip_ddb:
             processed += 1
             if processed % 2000 == 0 or processed == len(sorted_ids):
                 log_to_db(f"Progress: {processed}/{len(sorted_ids)} (ok={counts['ok']}, no_content={counts['no_content']}, skipped={counts['skipped']}, err={counts['error']})")
-                
-        dest_conn.close()
+
         log_to_db(f"Task Complete! ok={counts['ok']}, skipped={counts['skipped']}, no_content={counts['no_content']}, err={counts['error']}")
 
     except Exception as e:
@@ -161,6 +168,16 @@ def run_ingest_sync(task_id: int, limit: int = 0, force: bool = False, skip_ddb:
         log_to_db(f"CRITICAL ERROR:\n{error_trace}")
         raise e
     finally:
+        if ddb_sess:
+            try:
+                ddb_sess.close()
+            except Exception:
+                pass
+        if dest_conn:
+            try:
+                dest_conn.close()
+            except Exception:
+                pass
         db_session.close()
 
 
@@ -175,9 +192,10 @@ async def execute_ingest_task(task_id: int, params_json: str):
             params = json.loads(params_json)
         except:
             pass
-            
+
     limit = params.get("limit", 0)
     force = params.get("force", False)
     skip_ddb = params.get("skip_ddb", False)
-    
-    await asyncio.to_thread(run_ingest_sync, task_id, limit, force, skip_ddb)
+    incremental = params.get("incremental", False)
+
+    await asyncio.to_thread(run_ingest_sync, task_id, limit, force, skip_ddb, incremental)
