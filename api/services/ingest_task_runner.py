@@ -73,57 +73,78 @@ def run_ingest_sync(task_id: int, limit: int = 0, force: bool = False, skip_ddb:
             except Exception as e:
                 log_to_db(f"DolphinDB connection failed: {e}")
 
-        total = api.list_articles(0, 1)["total"]
-        log_to_db(f"Total articles in API: {total}")
-
-        counts = {"ok": 0, "skipped": 0, "no_content": 0, "error": 0}
-        processed = 0
+        # ─── 阶段 1: 批量获取所有 API 文章 ID（只拿 ID，不做详情请求）───
+        log_to_db("Fetching all article IDs from API...")
+        all_api_ids = set()
+        api_id_to_item = {}  # id -> item 映射，用于补充 get_article 缺失的字段
         offset = 0
-        page_size = 50
-        request_timeout = 30
-
+        page_size = 500  # 拿 ID 可以加大页码
         while True:
             page = api.list_articles(offset, page_size)
-            items = page["list"]
+            items = page.get("list", [])
             if not items:
                 break
-
             for item in items:
-                if limit and processed >= limit:
-                    break
-
-                aid = item["id"]
-                article = api.get_article(aid)
-                if not article:
-                    counts["error"] += 1
-                    processed += 1
-                    continue
-                
-                for key in ["mp_name", "mp_id", "title", "publish_time", "url", "pic_url"]:
-                    if key in item and (key not in article or not article[key]):
-                        article[key] = item[key]
-
-                try:
-                    result = old_ingest.process_article(
-                        article, dest_conn, img_sess,
-                        cos_client, bucket, region,
-                        ddb_sess, cfg,
-                        request_timeout, force, skip_ddb
-                    )
-                    counts[result] += 1
-                except Exception as e:
-                    counts["error"] += 1
-                    log_to_db(f"Error processing {item.get('title', aid)}: {e}")
-
-                processed += 1
-                if processed % 5 == 0:
-                    log_to_db(f"Progress: {processed}/{limit or total} (ok={counts['ok']}, skipped={counts['skipped']}, err={counts['error']})")
-
+                all_api_ids.add(item["id"])
+                api_id_to_item[item["id"]] = item
+            if len(items) < page_size:
+                break
             offset += page_size
-            if limit and processed >= limit:
-                break
-            if offset >= total:
-                break
+        log_to_db(f"Total articles in API: {len(all_api_ids)}")
+
+        # ─── 阶段 2: 查本地已存在的 ID ───
+        local_existing = set()
+        cursor = dest_conn.execute("SELECT article_id FROM wemp_articles WHERE md_converted = 1")
+        for row in cursor:
+            local_existing.add(row[0])
+        log_to_db(f"Already in local DB: {len(local_existing)}")
+
+        # ─── 阶段 3: 差集 = 需要处理的文章 ID ───
+        if not force:
+            ids_to_process = all_api_ids - local_existing
+            counts = {"ok": 0, "skipped": len(local_existing & all_api_ids), "no_content": 0, "error": 0}
+        else:
+            ids_to_process = all_api_ids
+            counts = {"ok": 0, "skipped": 0, "no_content": 0, "error": 0}
+        log_to_db(f"Need to process: {len(ids_to_process)} (skipped: {counts['skipped']})")
+
+        # ─── 阶段 4: 只拉取需要处理的文章详情 ───
+        processed = 0
+        request_timeout = 30
+        # 按 ID 排序，保持稳定的处理顺序
+        sorted_ids = sorted(ids_to_process)
+        if limit:
+            sorted_ids = sorted_ids[:limit]
+
+        for aid in sorted_ids:
+            article = api.get_article(aid)
+            if not article:
+                counts["error"] += 1
+                processed += 1
+                continue
+
+            # 补充 list 接口中可能有的字段
+            # 补充 list 接口中的字段（get_article 可能缺失）
+            list_item = api_id_to_item.get(aid, {})
+            for key in ["mp_name", "mp_id", "title", "publish_time", "url", "pic_url"]:
+                if key in list_item and (key not in article or not article[key]):
+                    article[key] = list_item[key]
+
+            try:
+                result = old_ingest.process_article(
+                    article, dest_conn, img_sess,
+                    cos_client, bucket, region,
+                    ddb_sess, cfg,
+                    request_timeout, force, skip_ddb
+                )
+                counts[result] += 1
+            except Exception as e:
+                counts["error"] += 1
+                log_to_db(f"Error processing {article.get('title', aid)}: {e}")
+
+            processed += 1
+            if processed % 5 == 0:
+                log_to_db(f"Progress: {processed}/{len(sorted_ids)} (ok={counts['ok']}, skipped={counts['skipped']}, err={counts['error']})")
                 
         dest_conn.close()
         log_to_db(f"Task Complete! ok={counts['ok']}, skipped={counts['skipped']}, no_content={counts['no_content']}, err={counts['error']}")
