@@ -106,11 +106,11 @@ async def scheduled_ingest_worker():
                 db.close()
                 continue
 
-            # 投递新任务
+            # 投递新任务（增量模式 + 自动向量化）
             new_task = IngestTask(
                 task_type="ingest",
                 status="pending",
-                params=json.dumps({"limit": 0, "force": False, "skip_ddb": True})
+                params=json.dumps({"limit": 0, "force": False, "skip_ddb": False, "incremental": True})
             )
             db.add(new_task)
             # 记录执行时间
