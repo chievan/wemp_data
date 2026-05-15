@@ -138,13 +138,16 @@ def run_ingest_sync(task_id: int, limit: int = 0, force: bool = False, skip_ddb:
                     request_timeout, force, skip_ddb
                 )
                 counts[result] += 1
+                if result == "ok":
+                    title = article.get("title", aid)
+                    log_to_db(f"✅ {title[:50]}")
             except Exception as e:
                 counts["error"] += 1
-                log_to_db(f"Error processing {article.get('title', aid)}: {e}")
+                log_to_db(f"❌ Error processing {article.get('title', aid)}: {e}")
 
             processed += 1
-            if processed % 5 == 0:
-                log_to_db(f"Progress: {processed}/{len(sorted_ids)} (ok={counts['ok']}, skipped={counts['skipped']}, err={counts['error']})")
+            if processed % 2000 == 0 or processed == len(sorted_ids):
+                log_to_db(f"Progress: {processed}/{len(sorted_ids)} (ok={counts['ok']}, no_content={counts['no_content']}, skipped={counts['skipped']}, err={counts['error']})")
                 
         dest_conn.close()
         log_to_db(f"Task Complete! ok={counts['ok']}, skipped={counts['skipped']}, no_content={counts['no_content']}, err={counts['error']}")
