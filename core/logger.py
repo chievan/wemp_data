@@ -17,15 +17,16 @@ _formatter = logging.Formatter(_FMT, datefmt=_DATE_FMT)
 def get_logger(name: str, filename: str = None, level=logging.INFO) -> logging.Logger:
     """
     获取一个预配置的 Logger，同时输出到控制台和独立日志文件。
-    
+
     Usage:
         from core.logger import get_logger
         logger = get_logger("ingest", "ingest.log")
         logger.info("Started ingesting...")
     """
     logger = logging.getLogger(name)
-    if logger.handlers:
-        return logger  # 已初始化，直接返回
+    # 使用模块级标记防止 handler 重复添加（比检查 handlers 更可靠）
+    if getattr(logger, '_handlers_configured', False):
+        return logger
 
     logger.setLevel(level)
     logger.propagate = False
@@ -46,6 +47,7 @@ def get_logger(name: str, filename: str = None, level=logging.INFO) -> logging.L
         fh.setFormatter(_formatter)
         logger.addHandler(fh)
 
+    logger._handlers_configured = True
     return logger
 
 
