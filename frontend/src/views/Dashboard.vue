@@ -8,6 +8,11 @@ const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api/v1'
 const status = ref<string>('idle')
 const taskId = ref<number | null>(null)
 const isLoading = ref(false)
+const scheduleEnabled = ref(false)
+const scheduleInterval = ref(3600)
+const scheduleLastRun = ref<number | null>(null)
+const scheduleNextRun = ref<number | null>(null)
+const scheduleSaving = ref(false)
 
 const formatDate = (val: any) => {
   if (!val) return '-'
@@ -127,10 +132,38 @@ const fetchStatus = async () => {
           pollInterval = null
         }
         fetchStats()
+        fetchSchedule()
       }
     }
   } catch (e) {
     console.error('Error fetching status', e)
+  }
+}
+
+const fetchSchedule = async () => {
+  try {
+    const res = await axios.get(`${API_BASE}/ingest/schedule`)
+    scheduleEnabled.value = res.data.enabled
+    scheduleInterval.value = res.data.interval_seconds
+    scheduleLastRun.value = res.data.last_run
+    scheduleNextRun.value = res.data.next_run
+  } catch (e) {
+    console.error(e)
+  }
+}
+
+const saveSchedule = async () => {
+  scheduleSaving.value = true
+  try {
+    await axios.put(`${API_BASE}/ingest/schedule`, {
+      enabled: scheduleEnabled.value,
+      interval_seconds: scheduleInterval.value,
+    })
+    fetchSchedule()
+  } catch (e: any) {
+    alert('保存失败: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    scheduleSaving.value = false
   }
 }
 
@@ -211,6 +244,7 @@ onMounted(() => {
   fetchStatus()
   fetchStats()
   fetchArticles()
+  fetchSchedule()
 })
 
 
@@ -322,6 +356,43 @@ onUnmounted(() => {
           <div class="px-3 py-1.5 bg-slate-100 rounded-lg border border-slate-200 text-xs">4. 存入 SQLite</div>
           <div class="text-slate-400">➔</div>
           <div class="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg border border-blue-200 font-bold text-xs">5. DolphinDB 向量化</div>
+        </div>
+
+        <!-- 定时任务控制 -->
+        <div class="mt-4 flex items-center gap-6 bg-slate-50 rounded-xl px-5 py-3 border border-slate-200">
+          <div class="flex items-center gap-3">
+            <span class="text-sm font-medium text-slate-600">⏰ 定时同步</span>
+            <button 
+              @click="scheduleEnabled = !scheduleEnabled; saveSchedule()"
+              :disabled="scheduleSaving"
+              class="relative w-11 h-6 rounded-full transition-colors duration-200 focus:outline-none"
+              :class="scheduleEnabled ? 'bg-blue-600' : 'bg-slate-300'"
+            >
+              <span 
+                class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200"
+                :class="scheduleEnabled ? 'translate-x-5' : 'translate-x-0'"
+              ></span>
+            </button>
+          </div>
+          <div class="flex items-center gap-2" v-if="scheduleEnabled">
+            <span class="text-xs text-slate-500">间隔</span>
+            <select 
+              v-model.number="scheduleInterval" 
+              @change="saveSchedule()"
+              class="px-3 py-1 border border-slate-300 rounded-lg text-sm font-medium bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option :value="1800">30 分钟</option>
+              <option :value="3600">1 小时</option>
+              <option :value="7200">2 小时</option>
+              <option :value="21600">6 小时</option>
+              <option :value="43200">12 小时</option>
+              <option :value="86400">24 小时</option>
+            </select>
+          </div>
+          <div class="text-xs text-slate-400 ml-auto" v-if="scheduleEnabled && scheduleLastRun">
+            上次: {{ formatDate(scheduleLastRun) }}
+            <template v-if="scheduleNextRun"> · 下次: {{ formatDate(scheduleNextRun) }}</template>
+          </div>
         </div>
         
         <div class="mt-4 bg-slate-900 rounded-xl p-4 font-mono text-xs text-green-400 h-40 overflow-y-auto" v-if="status === 'running' || status === 'pending'">

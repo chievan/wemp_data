@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from pydantic import BaseModel
 import json
 import os
@@ -17,6 +18,55 @@ from core.logger import api_logger
 import hashlib
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
+
+
+# ─── 定时任务配置 ───
+
+_SCHEDULE_KEY = "ingest_schedule"
+
+def _get_schedule(db: Session) -> dict:
+    """从 settings 表读取定时配置，不存在则返回默认值"""
+    row = db.execute(text("SELECT value FROM app_settings WHERE key = :k"), {"k": _SCHEDULE_KEY}).fetchone()
+    if row:
+        return json.loads(row[0])
+    return {"enabled": False, "interval_seconds": 3600}
+
+def _set_schedule(db: Session, data: dict):
+    """写入定时配置"""
+    db.execute(text(
+        "INSERT INTO app_settings (key, value) VALUES (:k, :v) ON CONFLICT(key) DO UPDATE SET value = :v"
+    ), {"k": _SCHEDULE_KEY, "v": json.dumps(data)})
+    db.commit()
+
+class ScheduleConfig(BaseModel):
+    enabled: bool
+    interval_seconds: int = 3600
+
+@router.get("/schedule")
+def get_schedule(db: Session = Depends(get_db)):
+    cfg = _get_schedule(db)
+    # 读取上次执行时间
+    last_row = db.execute(text(
+        "SELECT value FROM app_settings WHERE key = 'ingest_last_run'"
+    )).fetchone()
+    last_run_ts = None
+    next_run_ts = None
+    if last_row:
+        last_run_ts = json.loads(last_row[0]).get("ts")
+        if last_run_ts:
+            next_run_ts = last_run_ts + cfg.get("interval_seconds", 3600)
+    return {
+        **cfg,
+        "last_run": last_run_ts,
+        "next_run": next_run_ts,
+    }
+
+@router.put("/schedule")
+def update_schedule(req: ScheduleConfig, db: Session = Depends(get_db)):
+    if req.interval_seconds < 300:
+        raise HTTPException(status_code=400, detail="间隔不能小于 300 秒（5 分钟）")
+    _set_schedule(db, req.model_dump())
+    return {"message": "OK", "schedule": req.model_dump()}
 
 class IngestRequest(BaseModel):
     limit: int = 0

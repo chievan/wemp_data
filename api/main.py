@@ -12,6 +12,18 @@ from core.logger import api_logger
 # Create tables
 Base.metadata.create_all(bind=engine)
 
+# Ensure app_settings table exists
+from sqlalchemy import text as sa_text
+with engine.connect() as conn:
+    conn.execute(sa_text("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT DEFAULT (datetime('now'))
+        )
+    """))
+    conn.commit()
+
 async def background_task_worker():
     from datetime import datetime
     api_logger.info("Background worker started...")
@@ -44,29 +56,58 @@ async def background_task_worker():
         await asyncio.sleep(5)
 
 async def scheduled_ingest_worker():
-    """每小时自动投递 ingest 任务（仅当无 pending/running 任务时）"""
+    """定时投递 ingest 任务，配置从 app_settings 表读取"""
     import json
-    from api.core.config import _yaml_cfg
-    interval = int(_yaml_cfg.get("poll_interval_seconds", 3600))
-    api_logger.info(f"Scheduled ingest worker started, interval={interval}s")
+    api_logger.info("Scheduled ingest worker started")
 
     while True:
-        await asyncio.sleep(interval)
+        await asyncio.sleep(60)  # 每分钟检查一次配置
         try:
             db = SessionLocal()
+            row = db.execute(sa_text(
+                "SELECT value FROM app_settings WHERE key = 'ingest_schedule'"
+            )).fetchone()
+            if not row:
+                db.close()
+                continue
+            cfg = json.loads(row[0])
+            if not cfg.get("enabled"):
+                db.close()
+                continue
+
+            # 检查是否到了执行时间
+            last_row = db.execute(sa_text(
+                "SELECT value FROM app_settings WHERE key = 'ingest_last_run'"
+            )).fetchone()
+            now = datetime.utcnow().timestamp()
+            interval = cfg.get("interval_seconds", 3600)
+            if last_row:
+                last_run = json.loads(last_row[0]).get("ts", 0)
+            else:
+                last_run = 0
+            if now - last_run < interval:
+                db.close()
+                continue
+
+            # 检查是否有正在运行的任务
             running = db.query(IngestTask).filter(
                 IngestTask.status.in_(["pending", "running"])
             ).first()
             if running:
-                api_logger.info(f"Task {running.id} still {running.status}, skip scheduled ingest")
                 db.close()
                 continue
+
+            # 投递新任务
             new_task = IngestTask(
                 task_type="ingest",
                 status="pending",
                 params=json.dumps({"limit": 0, "force": False, "skip_ddb": True})
             )
             db.add(new_task)
+            # 记录执行时间
+            db.execute(sa_text(
+                "INSERT INTO app_settings (key, value) VALUES ('ingest_last_run', :v) ON CONFLICT(key) DO UPDATE SET value = :v"
+            ), {"v": json.dumps({"ts": now})})
             db.commit()
             api_logger.info(f"Scheduled ingest task #{new_task.id} queued")
             db.close()
