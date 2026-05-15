@@ -46,7 +46,7 @@ api_keys:
 # 6. 运行参数
 feed_batch_size: 30
 article_batch_size: 20
-poll_interval_seconds: 600
+poll_interval_seconds: 3600
 
 # 7. 日志配置
 logging:

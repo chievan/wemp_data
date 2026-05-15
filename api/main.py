@@ -43,11 +43,43 @@ async def background_task_worker():
             api_logger.error(f"Worker error: {e}")
         await asyncio.sleep(5)
 
+async def scheduled_ingest_worker():
+    """每小时自动投递 ingest 任务（仅当无 pending/running 任务时）"""
+    import json
+    from api.core.config import _yaml_cfg
+    interval = int(_yaml_cfg.get("poll_interval_seconds", 3600))
+    api_logger.info(f"Scheduled ingest worker started, interval={interval}s")
+
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            db = SessionLocal()
+            running = db.query(IngestTask).filter(
+                IngestTask.status.in_(["pending", "running"])
+            ).first()
+            if running:
+                api_logger.info(f"Task {running.id} still {running.status}, skip scheduled ingest")
+                db.close()
+                continue
+            new_task = IngestTask(
+                task_type="ingest",
+                status="pending",
+                params=json.dumps({"limit": 0, "force": False, "skip_ddb": True})
+            )
+            db.add(new_task)
+            db.commit()
+            api_logger.info(f"Scheduled ingest task #{new_task.id} queued")
+            db.close()
+        except Exception as e:
+            api_logger.error(f"Scheduled ingest error: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(background_task_worker())
+    t1 = asyncio.create_task(background_task_worker())
+    t2 = asyncio.create_task(scheduled_ingest_worker())
     yield
-    task.cancel()
+    t1.cancel()
+    t2.cancel()
 
 app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan)
 
