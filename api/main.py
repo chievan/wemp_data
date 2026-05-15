@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,10 +27,27 @@ with engine.connect() as conn:
 
 async def background_task_worker():
     api_logger.info("Background worker started...")
+    ZOMBIE_TIMEOUT = 1800  # 30 分钟超时，自动标记僵尸任务为 failed
+
     while True:
         db = None
         try:
             db = SessionLocal()
+            # ─── 清理僵尸任务：running 超过 30 分钟的 ───
+            cutoff = (datetime.utcnow() - timedelta(seconds=ZOMBIE_TIMEOUT)).isoformat()
+            zombies = db.query(IngestTask).filter(
+                IngestTask.status == "running",
+                IngestTask.created_at < cutoff
+            ).all()
+            for z in zombies:
+                api_logger.warning(f"Zombie task #{z.id} ({z.task_type}) detected, marking as failed")
+                z.status = "failed"
+                z.logs = (z.logs or "") + f"\n[SYSTEM] Marked as zombie (running > {ZOMBIE_TIMEOUT}s)"
+                z.completed_at = datetime.utcnow()
+            if zombies:
+                db.commit()
+
+            # ─── 执行 pending 任务 ───
             task = db.query(IngestTask).filter(IngestTask.status == "pending").order_by(IngestTask.created_at.asc()).first()
             if task:
                 task.status = "running"
@@ -54,7 +71,7 @@ async def background_task_worker():
                     db = SessionLocal()
                     task = db.query(IngestTask).filter(IngestTask.id == task.id).first()
                     task.status = "failed"
-                    task.logs = str(task_err)[:2000]
+                    task.logs = (str(task_err) + "\n")[:2000]
                     task.completed_at = datetime.utcnow()
                     db.commit()
         except Exception as e:
@@ -71,17 +88,16 @@ async def scheduled_ingest_worker():
 
     while True:
         await asyncio.sleep(60)  # 每分钟检查一次配置
+        db = None
         try:
             db = SessionLocal()
             row = db.execute(sa_text(
                 "SELECT value FROM app_settings WHERE key = 'ingest_schedule'"
             )).fetchone()
             if not row:
-                db.close()
                 continue
             cfg = json.loads(row[0])
             if not cfg.get("enabled"):
-                db.close()
                 continue
 
             # 检查是否到了执行时间
@@ -95,15 +111,15 @@ async def scheduled_ingest_worker():
             else:
                 last_run = 0
             if now - last_run < interval:
-                db.close()
                 continue
+            api_logger.info(f"Scheduled check: interval={interval}s, elapsed={now - last_run:.0f}s, ready={'yes' if now - last_run >= interval else 'no'}")
 
             # 检查是否有正在运行的任务
             running = db.query(IngestTask).filter(
                 IngestTask.status.in_(["pending", "running"])
             ).first()
             if running:
-                db.close()
+                api_logger.info(f"Scheduled check: task #{running.id} ({running.status}) is blocking, skip")
                 continue
 
             # 投递新任务（增量模式 + 自动向量化）
@@ -118,10 +134,12 @@ async def scheduled_ingest_worker():
                 "INSERT INTO app_settings (key, value) VALUES ('ingest_last_run', :v) ON CONFLICT(key) DO UPDATE SET value = :v"
             ), {"v": json.dumps({"ts": now})})
             db.commit()
-            api_logger.info(f"Scheduled ingest task #{new_task.id} queued")
-            db.close()
+            api_logger.info(f"Scheduled ingest task #{new_task.id} queued (incremental mode)")
         except Exception as e:
             api_logger.error(f"Scheduled ingest error: {e}")
+        finally:
+            if db:
+                db.close()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
