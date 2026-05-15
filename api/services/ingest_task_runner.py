@@ -78,7 +78,7 @@ def run_ingest_sync(task_id: int, limit: int = 0, force: bool = False, skip_ddb:
         all_api_ids = set()
         api_id_to_item = {}  # id -> item 映射，用于补充 get_article 缺失的字段
         offset = 0
-        page_size = 500  # 拿 ID 可以加大页码
+        page_size = 100  # API limit=500 返回 422，用 100
         while True:
             page = api.list_articles(offset, page_size)
             items = page.get("list", [])
