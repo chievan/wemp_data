@@ -117,15 +117,19 @@ async def chat_with_docs(request: ChatRequest):
         
         final_context = "\n\n".join(context_parts) if context_parts else "暂无参考资料。"
 
-        # 5. 构建 System Prompt
+        # 5. 构建 System Prompt (注入当前系统时间以实现时间感知)
+        import datetime
+        current_date = datetime.datetime.now().strftime("%Y-%m-%d")
+        time_anchor = f"\n【当前系统时间是】：{current_date}。在阅读参考资料和分析观点时，请时刻注意时效性，优先参考最新日期的观点，切勿混淆新旧信息。"
+        
         if persona_prompt:
             # 如果有专家分身，将分身设定与基础知识库要求结合
-            base_system = f"你现在正在扮演一个特定的金融专家。请严格按照以下专家设定回答问题。\n{persona_prompt}\n\n{KNOWLEDGE_SYSTEM_PROMPT}"
+            base_system = f"你现在正在扮演一个特定的金融专家。请严格按照以下专家设定回答问题。\n{persona_prompt}\n\n{KNOWLEDGE_SYSTEM_PROMPT}{time_anchor}"
         elif effective_article_id:
             # 专项问答模式下的提示词增强
-            base_system = f"你现在是这份特定研究报告的分析专家。请严格基于提供的资料进行深度分析和回答，不要引用资料以外的常识，如果资料中没有提到相关信息，请直接说明。\n\n{KNOWLEDGE_SYSTEM_PROMPT}"
+            base_system = f"你现在是这份特定研究报告的分析专家。请严格基于提供的资料进行深度分析和回答，不要引用资料以外的常识，如果资料中没有提到相关信息，请直接说明。\n\n{KNOWLEDGE_SYSTEM_PROMPT}{time_anchor}"
         else:
-            base_system = KNOWLEDGE_SYSTEM_PROMPT
+            base_system = f"{KNOWLEDGE_SYSTEM_PROMPT}{time_anchor}"
         
         full_prompt = ChatPromptTemplate.from_messages([
             ("system", base_system),

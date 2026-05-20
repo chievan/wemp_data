@@ -94,11 +94,15 @@ class DolphinDBVectorStore(VectorStore):
         return [r["chunk_id"] for r in rows]
 
     def similarity_search(self, query: str, k: int = 4, filter: Optional[dict] = None, **kwargs: Any) -> List[Document]:
-        # Embed the query
+        # Embed the query and convert to float32 numpy array for Dolphindb compatibility
+        import numpy as np
+        import re
+        
         query_embedding = self.embedding.embed_query(query)
+        flat_qvec = np.array(query_embedding, dtype=np.float32)
         
         var_name = f"q_vec_{uuid.uuid4().hex}"
-        self.sess.upload({var_name: query_embedding})
+        self.sess.upload({var_name: flat_qvec})
         
         # 构建 Where 子句
         where_clause = ""
@@ -112,10 +116,16 @@ class DolphinDBVectorStore(VectorStore):
             if conditions:
                 where_clause = "where " + " and ".join(conditions)
 
+        # 智能历史模式检测：如果查询明确包含历史指标词，则不进行时效性衰减
+        has_history_indicator = bool(re.search(r'(20\d{2}|历史|往期|以前|回顾|过去|老数据)', query))
+        lambda_decay = 0.0 if has_history_indicator else 0.05
+
         script = f"""
+        qVec = float({var_name})
+        curr_ts = now()
         tbl = loadTable("{self.database_path}", "{self.table_name}")
         {f"tbl = select * from tbl {where_clause}" if where_clause else ""}
-        res = select *, each(dot{{, {var_name}}}, embedding) as score from tbl
+        res = select *, rowCosine(embedding, qVec) * exp(-{lambda_decay} * (curr_ts - pub_time)/86400000.0) as score from tbl
         select * from res order by score desc limit {k}
         """
         
