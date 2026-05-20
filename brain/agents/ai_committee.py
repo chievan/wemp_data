@@ -154,10 +154,10 @@ def get_committee_graph():
         response = llm.invoke(messages)
         decision = response.content.strip()
 
-        # 至少要让每位专家发完言后再走一轮交叉验证
-        min_turns_for_finish = len(members) + 1
-        # 硬性上限：防止无限循环（每位专家最多发言2轮 + CIO决议）
-        max_turns = len(members) * 2 + 2
+        # 初轮 round-robin 阶段 turns 不计数，因此只需要强制 1 轮交叉验证即可避免重复
+        min_turns_for_finish = 1
+        # 硬性上限：防止无限循环（1轮初始发言 + 1轮交叉验证 + CIO决议）
+        max_turns = len(members) + 3
         
         if current_turns >= max_turns or ("FINISH" in decision and current_turns >= min_turns_for_finish):
             final_res = llm.invoke([{"role": "system", "content": CIO_RESOLUTION_PROMPT}] + state["messages"])
