@@ -203,7 +203,19 @@ def get_committee_graph():
         
         # 1. 提炼搜索关键词与时间区间
         kw_prompt = EXPERT_KEYWORDS_PROMPT.format(expert_name=expert_name, current_date=current_date)
-        kw_res = llm.invoke([{"role": "user", "content": kw_prompt}] + state["messages"][-2:])
+        
+        # 过滤对话历史，只保留人类议题和 CIO 调度指令，防止其他专家的发言对关键词提炼进行上下文污染与注意力偏移
+        context_msgs = []
+        for msg in state["messages"]:
+            if isinstance(msg, HumanMessage):
+                context_msgs.append(f"用户核心议题：{msg.content}")
+            elif getattr(msg, "name", "") == "CIO":
+                context_msgs.append(f"CIO调度指令：{msg.content}")
+                
+        context_str = "\n".join(context_msgs)
+        focused_prompt = f"{kw_prompt}\n\n【当前对话上下文】：\n{context_str}\n\n请直接输出符合格式要求的 JSON，严禁包含任何 Markdown 标记或多余解释。"
+        
+        kw_res = llm.invoke([{"role": "user", "content": focused_prompt}])
         
         keywords = ""
         start_time = None
