@@ -3,6 +3,7 @@ import yaml
 import re
 import numpy as np
 import pandas as pd
+from typing import Optional
 from pathlib import Path
 from langchain_core.tools import tool
 from openai import OpenAI
@@ -43,7 +44,7 @@ def search_wemp_library_by_keywords(keywords: str, limit: int = 5):
         return f"关键词搜索出错: {str(e)}"
 
 @tool
-def search_wemp_library(query: str, mp_name: str = None, start_time: str = None, end_time: str = None, top_k: int = 5):
+def search_wemp_library(query: str, mp_name: Optional[str] = None, start_time: Optional[str] = None, end_time: Optional[str] = None, top_k: int = 5):
     """
     在私人研报文库（DolphinDB）中进行语义搜索（向量搜索）。
     如果指定了 mp_name，则只搜索该公众号的内容。
