@@ -43,10 +43,11 @@ def search_wemp_library_by_keywords(keywords: str, limit: int = 5):
         return f"关键词搜索出错: {str(e)}"
 
 @tool
-def search_wemp_library(query: str, mp_name: str = None, top_k: int = 5):
+def search_wemp_library(query: str, mp_name: str = None, start_time: str = None, end_time: str = None, top_k: int = 5):
     """
     在私人研报文库（DolphinDB）中进行语义搜索（向量搜索）。
     如果指定了 mp_name，则只搜索该公众号的内容。
+    如果指定了 start_time 或 end_time (格式如 'YYYY-MM-DD')，则进行时间范围硬过滤。
     适合处理模糊的、概念性的问题。
     """
     # 1. 生成向量 (使用单例配置)
@@ -69,17 +70,27 @@ def search_wemp_library(query: str, mp_name: str = None, top_k: int = 5):
     try:
         sess.upload({"queryVec": flat_qvec})
         
-        # 动态构建 WHERE 子句
-        where_clause = ""
+        # 动态构建 WHERE 子句以过滤条件，并利用 DolphinDB 分区裁剪
+        where_conds = []
         if mp_name:
-            where_clause = f"where mp_name = '{mp_name}'"
+            where_conds.append(f"mp_name = '{mp_name}'")
+        if start_time:
+            where_conds.append(f"pub_time >= timestamp('{start_time}')")
+        if end_time:
+            where_conds.append(f"pub_time <= timestamp('{end_time}')")
         
-        # 3. 构造时效性加权查询
+        where_clause = ""
+        if where_conds:
+            where_clause = "where " + " and ".join(where_conds)
+        
+        # 3. 构造时效性加权查询 (修复毫秒/纳秒时间换算 Bug，并采用经典指数衰减模型)
+        # lambda_decay = 0.05 意味着大约 14 天的半衰期
+        lambda_decay = 0.05
         script = f"""
         qVec = float(queryVec)
         curr_ts = now()
         select top {top_k} mp_name, title, pub_time, source_url, chunk_text, 
-               rowCosine(embedding, qVec) / (1.0 + (curr_ts - pub_time)/1000000000/86400 * 0.1) as time_weighted_score 
+               rowCosine(embedding, qVec) * exp(-{lambda_decay} * (curr_ts - pub_time)/86400000.0) as time_weighted_score 
         from loadTable("{ddb_cfg['database']}", "{ddb_cfg['chunks_table']}")
         {where_clause}
         order by time_weighted_score desc

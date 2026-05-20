@@ -6,10 +6,11 @@ Wemp 是一款面向专业金融投研领域的**全栈 AI 数据中台**。它�
 
 ## 🌟 核心功能
 
-* **研报知识库 (RAG)**: 支持 DeepSeek V4 (Flash/Pro) 与 通义千问 (Qwen-Plus/Max) 多模型切换，集成私有库与全网实时检索。
-* **智能投委会**: 基于 LangGraph 的多 Agent 协作系统，模拟专家辩论决策。
-* **数据资产中心**: 全量数据同步、向量化任务控制与研报管理。
-* **系统日志监控**: 独立页面实时监控后端（API、Ingest、Vectorize）日志。
+*   **研报知识库 (RAG)**: 支持 DeepSeek V4 (Flash/Pro) 与 通义千问 (Qwen-Plus/Max) 多模型切换，集成私有库与全网实时检索。
+*   **时间感知 RAG (Temporal RAG)**: 自研毫秒级时效性重排，基于时序大底座 (DolphinDB) 的指数衰减公式，支持智能 Agent 提取时间边界与多分区并行剪裁。
+*   **智能投委会**: 基于 LangGraph 的多 Agent 协作系统，模拟专家辩论决策。
+*   **数据资产中心**: 全量数据同步、向量化任务控制与研报管理。
+*   **系统日志监控**: 独立页面实时监控后端（API、Ingest、Vectorize）日志。
 
 ---
 
@@ -32,6 +33,25 @@ wemp_data/
 ├── main.py             # 命令行运维工具 (健康检查/手动同步)
 └── requirements.txt    # 后端依赖清单
 ```
+
+---
+
+## ⏳ 时间感知 RAG (Temporal RAG)
+
+为解决金融宏观投研中“历史噪音干扰最新行情判定”的痛点，系统实现了一套端到端的时间感知 RAG 方案：
+
+1. **时效性指数衰减算法 (Temporal Exponential Decay)**：
+   在 DolphinDB 中执行向量检索时，并非只按 Cosine 距离打分，而是将语义相似度与文档距今的时间天数进行指数融合：
+   $$Score_{final} = Score_{semantic} \times e^{-\lambda \Delta t}$$
+   *   其中 $\lambda = 0.05$（半衰期约 14 天）。几天前的文章打分小幅降低，数月前的文章打分快速归零，拒绝旧闻干扰。
+
+2. **多分区剪裁硬过滤 (Metadata Hard-Filtering)**：
+   *   `wemp_chunks` 向量表以 `pub_month` 作为分区键。
+   *   当检索传入 `start_time` / `end_time` 过滤条件时，自动触发 DolphinDB 的**分区剪裁 (Partition Pruning)**，跳过无用分区，将语义匹配计算开销降低数倍。
+
+3. **大模型时间锚点感知 (Time-Aware Agent Prompts)**：
+   *   CIO 和专家 Agent 在生成检索关键词时，系统会动态注入当前系统时间（Now）。
+   *   Agent 能够理解“近两周”、“上个月”等相对时间概念，并将其转换为绝对时间格式（YYYY-MM-DD）传入检索工具进行精确过滤。
 
 ---
 

@@ -144,10 +144,12 @@ def get_committee_graph():
                 "target_expert": next_researcher
             }
 
+        import datetime
+        current_date = datetime.datetime.now().strftime("%Y-%m-%d")
         mem_str = "\n".join(state.get("recent_memories", []))
         history_context = f"\n【近期共识回顾】：\n{mem_str}\n" if mem_str else ""
 
-        prompt = CIO_SUPERVISOR_SYSTEM_PROMPT.format(comm_type=comm_type, history_context=history_context)
+        prompt = CIO_SUPERVISOR_SYSTEM_PROMPT.format(comm_type=comm_type, history_context=history_context, current_date=current_date)
         messages = [{"role": "system", "content": prompt}] + state["messages"]
         response = llm.invoke(messages)
         decision = response.content.strip()
@@ -194,15 +196,44 @@ def get_committee_graph():
         expert_name = state.get("target_expert", "未知专家")
         my_skill = load_expert_skill(expert_name).replace("{", "{{").replace("}", "}}")
         
-        # 1. 提炼搜索关键词
-        kw_prompt = EXPERT_KEYWORDS_PROMPT.format(expert_name=expert_name)
+        import datetime
+        import json
+        import re
+        current_date = datetime.datetime.now().strftime("%Y-%m-%d")
+        
+        # 1. 提炼搜索关键词与时间区间
+        kw_prompt = EXPERT_KEYWORDS_PROMPT.format(expert_name=expert_name, current_date=current_date)
         kw_res = llm.invoke([{"role": "user", "content": kw_prompt}] + state["messages"][-2:])
-        keywords = kw_res.content.strip()
-        logger.info(f"Expert {expert_name} keywords: {keywords}")
+        
+        keywords = ""
+        start_time = None
+        end_time = None
+        
+        try:
+            clean_content = kw_res.content.strip()
+            # 兼容有些模型可能会输出 markdown json 块
+            if clean_content.startswith("```"):
+                clean_content = re.sub(r"^```[a-zA-Z]*\n|```$", "", clean_content, flags=re.M).strip()
+            params = json.loads(clean_content)
+            keywords = params.get("keywords", "").strip()
+            start_time = params.get("start_time")
+            end_time = params.get("end_time")
+            if start_time == "null" or start_time == "": start_time = None
+            if end_time == "null" or end_time == "": end_time = None
+        except Exception:
+            # 降级处理：若 JSON 解析失败，取整段作为关键词
+            keywords = kw_res.content.strip()
+            
+        logger.info(f"Expert {expert_name} time-aware query: keywords='{keywords}', start_time='{start_time}', end_time='{end_time}'")
 
         # 2. 执行双重检索
         # A. 私有历史
-        private_results = search_wemp_library.invoke({"query": keywords, "mp_name": expert_name})
+        private_results = search_wemp_library.invoke({
+            "query": keywords, 
+            "mp_name": expert_name,
+            "start_time": start_time,
+            "end_time": end_time
+        })
         # B. 博查全网
         from brain.tools.web_search_tool import search_bocha
         web_results = search_bocha(keywords, count=5)
@@ -234,7 +265,7 @@ def get_committee_graph():
         
         # 4. 生成深度分析回答
         prompt_node = ChatPromptTemplate.from_messages([
-            ("system", EXPERT_SYSTEM_PROMPT.format(expert_name=expert_name, my_skill=my_skill)),
+            ("system", EXPERT_SYSTEM_PROMPT.format(expert_name=expert_name, my_skill=my_skill, current_date=current_date)),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", EXPERT_HUMAN_TEMPLATE),
         ])
