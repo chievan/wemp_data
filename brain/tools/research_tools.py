@@ -98,6 +98,25 @@ def search_wemp_library(query: str, mp_name: Optional[str] = None, start_time: O
         """
         df = sess.run(script)
         
+        # 【核心优化：弹性时效降级机制 (Elastic Temporal Fallback)】
+        # 如果因为严格的时间硬过滤（如 2026 年限制）或指数衰减导致 2024 年的历史沉淀数据返回为空，自动降级为标准无衰减语义搜索
+        if (df is None or df.empty) and (start_time or end_time or lambda_decay > 0.0):
+            print("🔄 [Temporal RAG Fallback] Strict time filters returned 0 matches. Retrying with standard semantic search...")
+            fallback_conds = []
+            if mp_name:
+                fallback_conds.append(f"mp_name = '{mp_name}'")
+            fallback_clause = "where " + " and ".join(fallback_conds) if fallback_conds else ""
+            
+            fallback_script = f"""
+            qVec = float(queryVec)
+            select top {top_k} mp_name, title, pub_time, source_url, chunk_text, 
+                   rowCosine(embedding, qVec) as time_weighted_score 
+            from loadTable("{ddb_cfg['database']}", "{ddb_cfg['chunks_table']}")
+            {fallback_clause}
+            order by time_weighted_score desc
+            """
+            df = sess.run(fallback_script)
+        
         if df is None or df.empty:
             return "文库中暂无相关语义匹配数据。"
             
