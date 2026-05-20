@@ -213,9 +213,26 @@ def get_committee_graph():
                 context_msgs.append(f"CIO调度指令：{msg.content}")
                 
         context_str = "\n".join(context_msgs)
-        focused_prompt = f"{kw_prompt}\n\n【当前对话上下文】：\n{context_str}\n\n请直接输出符合格式要求的 JSON，严禁包含任何 Markdown 标记或多余解释。"
         
-        kw_res = llm.invoke([{"role": "user", "content": focused_prompt}])
+        # 构造高精度的系统和用户提示词，确保模型在单次会话中稳定输出纯 JSON
+        kw_system = "你是一个高精度的投研检索参数提取工具。你必须且只能输出纯 JSON，严禁输出任何 Markdown 标记（如 ```json）、任何闲聊、解释或前导/后导文字。"
+        kw_user = f"""当前系统时间是 {current_date}。
+当前讨论上下文：
+{context_str}
+
+请结合上下文，为委员【{expert_name}】分析其检索私有研报库和全网所需的最具针对性的 2-3 个核心关键词，以及时间过滤范围（转换成 YYYY-MM-DD 格式，若无限制则为 null）。
+
+你必须且只能输出如下格式的 JSON 对象：
+{{
+    "keywords": "关键词1 关键词2",
+    "start_time": "开始日期 YYYY-MM-DD 或 null",
+    "end_time": "结束日期 YYYY-MM-DD 或 null"
+}}"""
+        
+        kw_res = llm.invoke([
+            ("system", kw_system),
+            ("human", kw_user)
+        ])
         
         keywords = ""
         start_time = None
@@ -223,9 +240,11 @@ def get_committee_graph():
         
         try:
             clean_content = kw_res.content.strip()
-            # 兼容有些模型可能会输出 markdown json 块
-            if clean_content.startswith("```"):
-                clean_content = re.sub(r"^```[a-zA-Z]*\n|```$", "", clean_content, flags=re.M).strip()
+            # 【鲁棒性超强增强】：利用正则截取首尾花括号，强行抽离出干净的 JSON，彻底免疫 Markdown 标记与前导/后导口语化文字
+            json_match = re.search(r'(\{.*\})', clean_content, re.DOTALL)
+            if json_match:
+                clean_content = json_match.group(1)
+                
             params = json.loads(clean_content)
             keywords = params.get("keywords", "").strip()
             start_time = params.get("start_time")
