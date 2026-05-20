@@ -76,9 +76,9 @@ def search_wemp_library(query: str, mp_name: Optional[str] = None, start_time: O
         if mp_name:
             where_conds.append(f"mp_name = '{mp_name}'")
         if start_time:
-            where_conds.append(f"pub_time >= timestamp('{start_time}')")
+            where_conds.append(f"pub_time >= temporalParse('{start_time}', 'yyyy-MM-dd')")
         if end_time:
-            where_conds.append(f"pub_time <= timestamp('{end_time}')")
+            where_conds.append(f"pub_time <= temporalParse('{end_time}', 'yyyy-MM-dd')")
         
         where_clause = ""
         if where_conds:
