@@ -150,7 +150,22 @@ def get_committee_graph():
         history_context = f"\n【近期共识回顾】：\n{mem_str}\n" if mem_str else ""
 
         prompt = CIO_SUPERVISOR_SYSTEM_PROMPT.format(comm_type=comm_type, history_context=history_context, current_date=current_date)
-        messages = [{"role": "system", "content": prompt}] + state["messages"]
+        
+        if current_turns > 0:
+            prompt += "\n\n【特别提醒】：本次会议已进行过交叉验证。请根据最新回答判断，如果问题已查清且各方逻辑闭环，请务必直接回复 'FINISH' 结束会议，绝对不要重复问刚才问过的问题！"
+
+        # 格式化消息上下文，把 name 显式注入 content 中，防止模型底层 API 忽略 name 字段导致"脸盲"
+        formatted_messages = []
+        for m in state["messages"]:
+            speaker = getattr(m, "name", "")
+            if isinstance(m, AIMessage) and speaker:
+                formatted_messages.append(AIMessage(content=f"【发言人: {speaker}】\n{m.content}", name=speaker))
+            elif isinstance(m, HumanMessage):
+                formatted_messages.append(HumanMessage(content=f"【用户核心议题】\n{m.content}"))
+            else:
+                formatted_messages.append(m)
+
+        messages = [{"role": "system", "content": prompt}] + formatted_messages
         response = llm.invoke(messages)
         decision = response.content.strip()
 
@@ -160,7 +175,7 @@ def get_committee_graph():
         max_turns = len(members) + 3
         
         if current_turns >= max_turns or ("FINISH" in decision and current_turns >= min_turns_for_finish):
-            final_res = llm.invoke([{"role": "system", "content": CIO_RESOLUTION_PROMPT}] + state["messages"])
+            final_res = llm.invoke([{"role": "system", "content": CIO_RESOLUTION_PROMPT}] + formatted_messages)
             return {
                 "messages": [AIMessage(content=final_res.content, name="CIO_Resolution")],
                 "next_step": "END", 
