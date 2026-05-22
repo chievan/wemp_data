@@ -345,7 +345,7 @@ def process_article(
     skip_ddb: bool,
 ) -> str:
     aid = article["id"]
-    raw_html = article.get("content") or ""
+    raw_html = article.get("content") or article.get("content_html") or ""
 
     if not raw_html.strip():
         return "no_content"

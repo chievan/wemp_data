@@ -77,8 +77,15 @@ def run_ingest_sync(task_id: int, limit: int = 0, force: bool = False, skip_ddb:
             except Exception as e:
                 log_to_db(f"DolphinDB connection failed: {e}")
 
-        # ─── 阶段 1: 批量获取 API 文章 ID（只拿 ID，不做详情请求）───
-        log_to_db("Fetching all article IDs from API...")
+        # ─── 阶段 1: 查本地已存在的 ID ───
+        local_existing = set()
+        cursor = dest_conn.execute("SELECT article_id FROM wemp_articles WHERE md_converted = 1")
+        for row in cursor:
+            local_existing.add(row[0])
+        log_to_db(f"Already in local DB: {len(local_existing)}")
+
+        # ─── 阶段 2: 批量获取 API 文章 ID ───
+        log_to_db("Fetching article IDs from API...")
         all_api_ids = set()
         api_id_to_item = {}  # id -> item 映射，用于补充 get_article 缺失的字段
         offset = 0
@@ -88,24 +95,25 @@ def run_ingest_sync(task_id: int, limit: int = 0, force: bool = False, skip_ddb:
             items = page.get("list", [])
             if not items:
                 break
+                
+            new_in_this_page = 0
             for item in items:
                 all_api_ids.add(item["id"])
                 api_id_to_item[item["id"]] = item
+                if item["id"] not in local_existing:
+                    new_in_this_page += 1
+                    
             if len(items) < page_size:
                 break
-            # 增量模式：只拉第一页（最新 100 篇）
-            if incremental:
-                log_to_db(f"Incremental mode: fetched {len(all_api_ids)} articles from latest page")
+                
+            # 增量模式：如果这一页全都是本地已经处理过的老文章，说明已经追平历史，停止向后拉取
+            if incremental and new_in_this_page == 0:
+                log_to_db(f"Incremental mode: caught up with existing articles after {offset + len(items)} items.")
                 break
+                
             offset += page_size
-        log_to_db(f"Total articles in API: {len(all_api_ids)}")
-
-        # ─── 阶段 2: 查本地已存在的 ID ───
-        local_existing = set()
-        cursor = dest_conn.execute("SELECT article_id FROM wemp_articles WHERE md_converted = 1")
-        for row in cursor:
-            local_existing.add(row[0])
-        log_to_db(f"Already in local DB: {len(local_existing)}")
+            
+        log_to_db(f"Total articles fetched from API: {len(all_api_ids)}")
 
         # ─── 阶段 3: 差集 = 需要处理的文章 ID ───
         if not force:
